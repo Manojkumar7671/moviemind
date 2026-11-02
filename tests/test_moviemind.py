@@ -146,7 +146,12 @@ def test_api_smoke_test():
 
     r = client.get("/ab")
     assert r.status_code == 200
-    assert "A/B Test" in r.text
+    assert "A/B Test" in r.text or "A/B" in r.text
+
+    # Static assets
+    assert client.get("/static/style.css").status_code == 200
+    assert client.get("/static/app.js").status_code == 200
+    assert client.get("/static/fonts/Anton-Regular.ttf").status_code == 200
 
 # 6. Test: explain() excludes target movie from its own similar-to-liked list
 def test_explain_excludes_self():

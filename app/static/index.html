@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MovieMind — Two-Stage Recommender & AI Screening Room</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="film-grain" aria-hidden="true"></div>
+
+  <!-- Header -->
+  <header class="app-header">
+    <a href="#" class="brand" aria-label="MovieMind Home">
+      <span style="font-size: 20px;">🎬</span>
+      <span class="brand-title">MOVIEMIND</span>
+      <span class="live-indicator">
+        <span class="live-dot"></span>
+        <span>TWO-STAGE ACTIVE</span>
+      </span>
+    </a>
+
+    <nav class="nav-tabs" aria-label="Main Navigation">
+      <button class="tab-btn active" data-tab="discover" aria-selected="true" role="tab">Discover</button>
+      <button class="tab-btn" data-tab="tastemap" aria-selected="false" role="tab">Taste Map</button>
+      <button class="tab-btn" data-tab="eval" aria-selected="false" role="tab">Evaluation</button>
+    </nav>
+
+    <div class="header-actions">
+      <button class="btn-icon" id="themeToggleBtn" onclick="toggleTheme()" aria-label="Toggle Light/Dark Theme" title="Toggle Theme">☀️</button>
+      <button class="chat-trigger" id="chatToggleBtn" aria-label="Open MovieMind Chat">
+        <span>Assistant</span>
+        <span class="kbd-hint">/</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Viewport -->
+  <main class="app-viewport">
+    
+    <!-- Tab 1: Discover -->
+    <section class="tab-content active" id="discoverTab" role="tabpanel" aria-labelledby="discover-tab">
+      
+      <!-- Skippable Onboarding Genre Picker -->
+      <div class="onboarding-banner" id="onboardingBanner">
+        <div class="onboarding-header">
+          <div>
+            <h2 class="section-title">Private Screening Onboarding</h2>
+            <p class="section-subtitle">Pick up to 5 favorite genres to steer your initial candidate space.</p>
+          </div>
+          <button class="btn-secondary" onclick="skipOnboarding()">Skip to popular</button>
+        </div>
+        <div class="genres-container" id="genreChipsContainer" role="group" aria-label="Genre selection">
+          <!-- Populated by JS -->
+        </div>
+        <button class="btn-primary" onclick="saveGenres()">Save genres</button>
+      </div>
+
+      <!-- Movie Grid -->
+      <div class="movie-grid" id="movieGrid">
+        <!-- Rendered by JS -->
+      </div>
+    </section>
+
+    <!-- Tab 2: Taste Map -->
+    <section class="tab-content" id="tastemapTab" role="tabpanel" aria-labelledby="tastemap-tab">
+      <div class="taste-map-wrapper">
+        <div style="display:flex; justify-content:space-between; align-items:flex-end;">
+          <div>
+            <h2 class="section-title">2D Movie Space & Taste Projection</h2>
+            <p class="section-subtitle">PCA projection of 64-dimensional neural item embeddings. Click any movie dot to like it and glide your taste center.</p>
+          </div>
+          <div class="taste-legend">
+            <span class="legend-item"><span class="legend-dot" style="background:#7F1D1D;"></span> Action</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#1E3A8A;"></span> Sci-Fi</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#B45309;"></span> Comedy</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#4C1D95;"></span> Drama</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#10B981;"></span> Liked</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#4FB5A5; box-shadow:0 0 6px #4FB5A5;"></span> Your Taste</span>
+          </div>
+        </div>
+
+        <div class="taste-map-container" id="tasteMapContainer">
+          <canvas id="tasteMapCanvas"></canvas>
+          <div class="map-tooltip" id="mapTooltip"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 3: Evaluation -->
+    <section class="tab-content" id="evalTab" role="tabpanel" aria-labelledby="eval-tab">
+      <div class="eval-grid">
+        
+        <!-- Offline Ablation Table -->
+        <div class="table-card">
+          <h2 class="section-title">Offline Recommender Ablation Table</h2>
+          <p class="section-subtitle">Evaluated on MovieLens 1M time-based leave-one-out test set (N=6,040 users, zero future leakage).</p>
+          <div style="overflow-x:auto;">
+            <table class="eval-table">
+              <thead>
+                <tr>
+                  <th>Stage</th>
+                  <th>Recall@10</th>
+                  <th>NDCG@10</th>
+                  <th>Coverage@10</th>
+                  <th>ILD@10</th>
+                  <th>Recall@50</th>
+                  <th>NDCG@50</th>
+                  <th>Coverage@50</th>
+                  <th>ILD@50</th>
+                </tr>
+              </thead>
+              <tbody id="ablationTbody">
+                <!-- Loaded via /api/eval -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Simulated A/B Test Banner -->
+        <div class="table-card" style="border-left: 4px solid var(--primary);">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+            <div>
+              <span class="badge-simulated">SIMULATED A/B TEST</span>
+              <h2 class="section-title" style="margin-top:6px;">Online Interaction Experiment Simulation</h2>
+              <p class="section-subtitle">Position-biased click examination model on held-out user interactions (N=5,000 sessions).</p>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:12px; color:var(--muted); text-transform:uppercase; font-weight:700;">Relative CTR Lift</div>
+              <div style="font-size:32px; font-weight:800; color:var(--primary);" id="abLiftVal">+11.18%</div>
+            </div>
+          </div>
+
+          <div class="ab-metrics-row">
+            <div class="metric-box">
+              <div style="font-size:12px; color:var(--muted);">Control (Popularity Baseline)</div>
+              <div class="metric-val-big" id="ctrControl">8.48%</div>
+              <div style="font-size:11px; color:var(--muted);" id="subControl">2,119 clicks / 25,000 impressions</div>
+            </div>
+            <div class="metric-box" style="border-color:var(--primary);">
+              <div style="font-size:12px; color:var(--primary);">Treatment (MovieMind Full Pipeline)</div>
+              <div class="metric-val-big" style="color:var(--primary);" id="ctrTreatment">9.42%</div>
+              <div style="font-size:11px; color:var(--muted);" id="subTreatment">2,356 clicks / 25,000 impressions</div>
+            </div>
+            <div class="metric-box">
+              <div style="font-size:12px; color:var(--muted);">Statistical Rigor</div>
+              <div style="font-size:14px; font-weight:700; color:var(--text); margin-top:6px;" id="abPVal">p = 0.0002 (Significant)</div>
+              <div style="font-size:11px; color:var(--muted); margin-top:4px;" id="abCiVal">95% Confidence Interval (absolute CTR difference): [+0.0045, +0.0145]</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Agent Evals Pass-Rate Table -->
+        <div class="table-card">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <h2 class="section-title">Agent Tool-Calling Evaluation Suite</h2>
+              <p class="section-subtitle">24 automated behavioral and adversarial test cases for tool routing and anti-hallucination.</p>
+            </div>
+            <span class="live-indicator" id="agentEvalSummary">24/24 passed (100%)</span>
+          </div>
+          <table class="eval-table">
+            <thead>
+              <tr>
+                <th>Test Suite Category</th>
+                <th>Cases</th>
+                <th>Passed</th>
+                <th>Pass Rate</th>
+              </tr>
+            </thead>
+            <tbody id="agentEvalTbody">
+              <!-- Loaded by JS -->
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Slide-In Chat Drawer -->
+  <div class="drawer-backdrop" id="drawerBackdrop"></div>
+  <aside class="chat-drawer" id="chatDrawer" aria-label="MovieMind Conversational Assistant" role="dialog" aria-modal="true">
+    <div class="drawer-header">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:18px;">🎬</span>
+        <strong>MovieMind Assistant</strong>
+      </div>
+      <button class="btn-icon" id="closeDrawerBtn" aria-label="Close Chat Drawer">✕</button>
+    </div>
+
+    <div class="drawer-messages" id="drawerMessages">
+      <div class="chat-bubble bot">
+        Welcome to your screening room. Ask for recommendations, movie facts, genre filters, or explanations citing real features!
+      </div>
+    </div>
+
+    <div style="padding: 8px 16px; background:var(--surface); border-top:1px solid var(--border); display:flex; gap:6px; overflow-x:auto;">
+      <button class="meta-chip" onclick="sendQuickPrompt('Recommend 4 sci-fi movies')">Recommend Sci-Fi</button>
+      <button class="meta-chip" onclick="sendQuickPrompt('Why recommend movie 2571?')">Explain 2571</button>
+      <button class="meta-chip" onclick="sendQuickPrompt('Show movies from 1999')">Movies 1999</button>
+      <button class="meta-chip" onclick="sendQuickPrompt('What is my taste profile?')">Taste Profile</button>
+    </div>
+
+    <div class="drawer-input-area">
+      <input type="text" id="chatInput" class="chat-input" placeholder="Type a message or movie query..." onkeydown="if(event.key==='Enter') sendChatMessage()" />
+      <button class="btn-primary" onclick="sendChatMessage()">Send</button>
+    </div>
+  </aside>
+
+  <!-- Live Action Toast -->
+  <div class="toast-msg" id="toast" role="status" aria-live="polite">
+    <span id="toastText">Recommendations updated</span>
+    <button class="toast-undo" id="toastUndoBtn" onclick="undoDismiss()">Undo</button>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
