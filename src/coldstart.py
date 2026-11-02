@@ -1,7 +1,12 @@
 import os
+import sys
+from pathlib import Path
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 os.environ["OMP_NUM_THREADS"] = "1"
-from pathlib import Path
 from typing import Dict, List, Optional
 import faiss
 faiss.omp_set_num_threads(1)

@@ -1,4 +1,9 @@
+import sys
 from pathlib import Path
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 from typing import Dict, List
 import matplotlib
 matplotlib.use("Agg")
@@ -87,6 +92,35 @@ def run_evaluation(data_dir: Path = DATA_DIR, artifacts_dir: Path = ARTIFACTS_DI
         )
         md_lines.append(row_str)
         print(f"{name:26s} | {m['Recall@10']:.4f} | {m['NDCG@10']:.4f} | {m['Coverage@10']:.4f} | {m['Novelty@10']:6.2f} | {m['ILD@10']:.4f} | {m['Recall@50']:.4f} | {m['NDCG@50']:.4f} | {m['Coverage@50']:.4f} | {m['Novelty@50']:6.2f} | {m['ILD@50']:.4f}")
+
+    # Per-Genre Accuracy Breakdown
+    movie_genres = movies_df.set_index("movie_id")["genres"].to_dict()
+    genre_stats = []
+    for g in sorted(ALL_GENRES):
+        users_with_g = 0
+        hits = 0
+        for u, target_mid in test_targets.items():
+            m_g = str(movie_genres.get(target_mid, "")).split("|")
+            if g in m_g:
+                users_with_g += 1
+                if target_mid in mmr_recs.get(u, [])[:10]:
+                    hits += 1
+        rec = (hits / users_with_g) if users_with_g > 0 else 0.0
+        genre_stats.append((g, users_with_g, hits, rec))
+    genre_stats.sort(key=lambda x: -x[3])
+
+    md_lines.extend([
+        "",
+        "## Per-Genre Accuracy Breakdown (Recall@10)",
+        "",
+        "Recall@10 evaluated on subsets of users whose ground-truth held-out interaction belongs to the specified genre:",
+        "",
+        "| Genre | Test Target Users | Hits@10 | Recall@10 | Share of Hits |",
+        "| :--- | :---: | :---: | :---: | :---: |",
+    ])
+    for g, tot, hits, rec in genre_stats:
+        pct = rec * 100
+        md_lines.append(f"| {g} | {tot:,} | {hits} | **{rec:.4f}** ({pct:.2f}%) | {hits}/{tot} |")
 
     # Key Insights in Markdown
     md_lines.extend([

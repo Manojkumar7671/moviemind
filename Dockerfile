@@ -11,11 +11,13 @@ ENV PYTHONUNBUFFERED=1 \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code, precomputed artifacts, and data
+# Copy source code, precomputed artifacts, evaluations, and data
 COPY data/ data/
 COPY artifacts/ artifacts/
 COPY src/ src/
 COPY app/ app/
+COPY evals/ evals/
+COPY docs/ docs/
 COPY pytest.ini .
 COPY tests/ tests/
 
