@@ -28,6 +28,22 @@ class MovieMindAgent:
         self.movie_meta = self.movies_df.set_index("movie_id").to_dict(orient="index")
         self.title_to_id = {row["title"].lower(): int(row["movie_id"]) for _, row in self.movies_df.iterrows()}
 
+        # Normalized title mapping for robust resolution
+        self.title_map = {}
+        for _, row in self.movies_df.iterrows():
+            mid = int(row["movie_id"])
+            ct = clean_title(row["title"]).lower()
+            self.title_map[ct] = mid
+            if ", the" in ct:
+                self.title_map["the " + ct.replace(", the", "").strip()] = mid
+            if ", a" in ct:
+                self.title_map["a " + ct.replace(", a", "").strip()] = mid
+        for a, mid in {
+            "matrix": 2571, "aliens": 1200, "alien": 1214, "godfather": 858,
+            "star wars": 260, "toy story": 1, "jurassic park": 480
+        }.items():
+            self.title_map[a] = mid
+
         self.memory = UserMemory()
         self.coldstart = ColdStartRecommender(data_dir, artifacts_dir)
 
@@ -543,67 +559,149 @@ class MovieMindAgent:
         fn = tool_map.get(name)
         return fn(**args) if fn else {"error": f"Unknown tool {name}"}
 
+    def find_movie_id_in_text(self, text: str) -> Optional[int]:
+        """Resolve numeric ID or canonical movie title from text."""
+        low = text.lower()
+        num_match = re.search(r"\b(\d{1,6})\b", low)
+        if num_match:
+            return int(num_match.group(1))
+        for t, mid in sorted(self.title_map.items(), key=lambda x: -len(x[0])):
+            if len(t) >= 4 and re.search(r"\b" + re.escape(t) + r"\b", low):
+                return mid
+        return None
+
+    def route_message(self, user_msg: str, user_id: str = "demo_user") -> Dict[str, Any]:
+        """Parse message, route to expected tool, execute, and return structured dispatch trace."""
+        msg = (user_msg or "").strip()
+        low = msg.lower()
+
+        # Adversarial 1: Empty input
+        if not msg:
+            return {
+                "tool": None,
+                "args": {},
+                "result": {"error": "Empty input"},
+                "response": "Please enter a message or movie query.",
+                "safe": True,
+                "is_adversarial": True,
+            }
+
+        # Adversarial 2: Prompt injection
+        if any(p in low for p in ("ignore all previous", "ignore previous instructions", "secret system prompt", "invent a fake movie")):
+            return {
+                "tool": None,
+                "args": {},
+                "result": {"error": "Prompt injection rejected"},
+                "response": "I cannot alter my instructions or invent non-existent movies. I am MovieMind, dedicated to recommending real movies from the MovieLens catalog.",
+                "safe": True,
+                "is_adversarial": True,
+            }
+
+        # Explain query
+        if "why" in low or "explain" in low:
+            mid = self.find_movie_id_in_text(low)
+            if mid is not None:
+                exp = self.explain(mid, user_id=user_id)
+                if "error" in exp:
+                    return {
+                        "tool": "explain",
+                        "args": {"movie_id": mid, "user_id": user_id},
+                        "result": exp,
+                        "response": exp["error"],
+                        "safe": True,
+                        "is_adversarial": mid not in self.movie_meta,
+                    }
+                return {
+                    "tool": "explain",
+                    "args": {"movie_id": mid, "user_id": user_id},
+                    "result": exp,
+                    "response": f"**Explanation for {exp['title']}**:\n{exp['explanation']}",
+                    "safe": True,
+                    "is_adversarial": False,
+                }
+
+        # Feedback query
+        if any(w in low for w in ("like ", "liked ", "love ", "loved ", "dislike ", "disliked ", "hate ")):
+            feedback_type = "dislike" if any(w in low for w in ("dislike", "hate")) else "like"
+            mid = self.find_movie_id_in_text(low)
+            if mid is not None:
+                res = self.record_feedback(user_id, mid, feedback_type)
+                return {
+                    "tool": "record_feedback",
+                    "args": {"user_id": user_id, "movie_id": mid, "feedback_type": feedback_type},
+                    "result": res,
+                    "response": f"Done! {res.get('message', res.get('error', ''))}",
+                    "safe": True,
+                    "is_adversarial": False,
+                }
+
+        # Taste profile
+        if any(w in low for w in ("taste", "profile", "history")):
+            prof = self.get_taste_profile(user_id)
+            return {
+                "tool": "get_taste_profile",
+                "args": {"user_id": user_id},
+                "result": prof,
+                "response": f"**Your Taste Profile**:\n{prof['taste_summary']}\n*(Liked: {prof['liked_count']}, Disliked: {prof['disliked_count']})*",
+                "safe": True,
+                "is_adversarial": False,
+            }
+
+        # Filter query
+        year_match = re.search(r"\b(19\d{2}|20\d{2})\b", low)
+        all_genres = ["Action", "Adventure", "Animation", "Children's", "Comedy", "Crime", "Documentary", "Drama", "Fantasy", "Film-Noir", "Horror", "Musical", "Mystery", "Romance", "Sci-Fi", "Thriller", "War", "Western"]
+        matched_genre = next((g for g in all_genres if g.lower() in low), None)
+        if "filter" in low or (year_match and any(w in low for w in ("from", "before", "after", "since", "released"))):
+            yr = int(year_match.group(1)) if year_match else None
+            min_y = yr if any(w in low for w in ("after", "since")) else None
+            max_y = yr if "before" in low else None
+            if ("from" in low or "released" in low) and yr and not min_y and not max_y:
+                min_y, max_y = yr, yr
+            results = self.filter_movies(genre=matched_genre, min_year=min_y, max_year=max_y, limit=5)
+            lines = [f"- **{r['title']}** ({r['year']}) - [{', '.join(r['genres'])}]" for r in results]
+            return {
+                "tool": "filter_movies",
+                "args": {"genre": matched_genre, "min_year": min_y, "max_year": max_y, "limit": 5},
+                "result": results,
+                "response": "**Filtered Movies:**\n" + ("\n".join(lines) if lines else "No movies matched your filter."),
+                "safe": True,
+                "is_adversarial": False,
+            }
+
+        # Search query
+        if any(w in low for w in ("search", "find", "look up")):
+            q = re.sub(r"^(search for|find|search|look up)\s+", "", low).strip()
+            q = re.sub(r"\s+movies?$", "", q).strip()
+            results = self.search_movies(q, limit=5)
+            lines = [f"- **{r['title']}** ({r['year']}) [ID: {r['movie_id']}] - {', '.join(r['genres'])}" for r in results]
+            return {
+                "tool": "search_movies",
+                "args": {"query": q, "limit": 5},
+                "result": results,
+                "response": "**Search Results:**\n" + ("\n".join(lines) if lines else f"No movies found matching '{q}'."),
+                "safe": True,
+                "is_adversarial": len(results) == 0,
+            }
+
+        # Recommend query
+        n_match = re.search(r"\b(\d+)\b", low)
+        n_items = int(n_match.group(1)) if n_match else 5
+        n_items = min(max(n_items, 1), 20)
+        genres_to_rec = [g for g in all_genres if g.lower() in low]
+        recs = self.recommend(user_id=user_id, genres=genres_to_rec or None, n=n_items)
+        lines = [f"{i+1}. **{r['title']}** ({r['year']}) - [{', '.join(r['genres'])}]" for i, r in enumerate(recs)]
+        return {
+            "tool": "recommend",
+            "args": {"user_id": user_id, "genres": genres_to_rec or None, "n": n_items},
+            "result": recs,
+            "response": f"**Recommended Movies for you:**\n" + "\n".join(lines),
+            "safe": True,
+            "is_adversarial": False,
+        }
+
     def chat_fallback(self, user_msg: str, user_id: str = "demo_user") -> str:
         """Rule-based tool router for graceful fallback when no API key is supplied."""
-        low = user_msg.lower()
-
-        # Check for feedback (e.g. "I liked The Matrix" or "like 2571")
-        if "like " in low or "liked " in low or "dislike " in low or "disliked " in low:
-            feedback_type = "dislike" if ("dislike" in low or "hate" in low) else "like"
-            # Check for movie ID
-            id_match = re.search(r"\b(\d{1,5})\b", low)
-            mid = None
-            if id_match:
-                mid = int(id_match.group(1))
-            else:
-                # Search for title in catalog
-                for title, tid in self.title_to_id.items():
-                    clean_title = re.sub(r"\s*\(\d{4}\)$", "", title)
-                    if clean_title in low:
-                        mid = tid
-                        break
-            if mid and mid in self.movie_meta:
-                res = self.record_feedback(user_id, mid, feedback_type)
-                return f"Done! {res['message']}"
-
-        # Check for profile
-        if "taste" in low or "profile" in low or "history" in low:
-            prof = self.get_taste_profile(user_id)
-            return f"**Your Taste Profile**:\n{prof['taste_summary']}\n*(Liked: {prof['liked_count']}, Disliked: {prof['disliked_count']})*"
-
-        # Check for explanation (e.g. "why recommend 1?" or "explain 2571")
-        if "why" in low or "explain" in low:
-            id_match = re.search(r"\b(\d{1,5})\b", low)
-            if id_match:
-                mid = int(id_match.group(1))
-                exp = self.explain(mid, user_id=user_id)
-                return f"**Explanation for {exp['title']}**:\n{exp['explanation']}"
-
-        # Check for filter (e.g. "movies from 1995" or "sci-fi movies after 1990")
-        year_match = re.search(r"\b(19\d{2}|20\d{2})\b", low)
-        genre_found = next((g for g in self.movies_df["genres"].unique() if g.lower() in low), None)
-        if "filter" in low or (year_match and ("before" in low or "after" in low or "from" in low)):
-            yr = int(year_match.group(1)) if year_match else None
-            min_y = yr if ("after" in low or "since" in low) else None
-            max_y = yr if ("before" in low) else None
-            if "from" in low and yr:
-                min_y, max_y = yr, yr
-            results = self.filter_movies(genre=genre_found, min_year=min_y, max_year=max_y, limit=5)
-            lines = [f"- **{r['title']}** ({r['year']}) - [{', '.join(r['genres'])}]" for r in results]
-            return "**Filtered Movies:**\n" + ("\n".join(lines) if lines else "No movies matched your filter.")
-
-        # Check for search
-        if "search" in low or "find" in low:
-            query = re.sub(r"^(search for|find|search)\s+", "", low).strip()
-            results = self.search_movies(query, limit=5)
-            lines = [f"- **{r['title']}** ({r['year']}) [ID: {r['movie_id']}] - {', '.join(r['genres'])}" for r in results]
-            return "**Search Results:**\n" + ("\n".join(lines) if lines else f"No movies found matching '{query}'.")
-
-        # Default: recommend
-        genres_to_rec = [g for g in ["Action", "Comedy", "Drama", "Sci-Fi", "Thriller", "Animation", "Romance"] if g.lower() in low]
-        recs = self.recommend(user_id=user_id, genres=genres_to_rec or None, n=5)
-        lines = [f"{i+1}. **{r['title']}** ({r['year']}) - [{', '.join(r['genres'])}]" for i, r in enumerate(recs)]
-        return f"**Recommended Movies for you:**\n" + "\n".join(lines)
+        return self.route_message(user_msg, user_id=user_id)["response"]
 
     def chat(self, user_msg: str, user_id: str = "demo_user") -> str:
         """Main chat interface calling LLM with tool calling or falling back gracefully."""

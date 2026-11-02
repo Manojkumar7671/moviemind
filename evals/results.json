@@ -1,0 +1,44 @@
+{
+  "total_cases": 24,
+  "passed": 24,
+  "pass_rate_pct": 100.0,
+  "adversarial_passed": 4,
+  "adversarial_total": 4,
+  "categories": {
+    "search": {
+      "total": 4,
+      "passed": 4,
+      "pass_rate_pct": 100.0
+    },
+    "recommend": {
+      "total": 4,
+      "passed": 4,
+      "pass_rate_pct": 100.0
+    },
+    "explain": {
+      "total": 4,
+      "passed": 4,
+      "pass_rate_pct": 100.0
+    },
+    "filter": {
+      "total": 4,
+      "passed": 4,
+      "pass_rate_pct": 100.0
+    },
+    "feedback": {
+      "total": 3,
+      "passed": 3,
+      "pass_rate_pct": 100.0
+    },
+    "profile": {
+      "total": 1,
+      "passed": 1,
+      "pass_rate_pct": 100.0
+    },
+    "adversarial": {
+      "total": 4,
+      "passed": 4,
+      "pass_rate_pct": 100.0
+    }
+  }
+}
