@@ -61,7 +61,7 @@ def evaluate_recs(
         unique_recs = set()
 
         for u, target in targets.items():
-            recs = recommendations.get(u, [])[:k]
+            recs = list(recommendations.get(u, []))[:k]
             unique_recs.update(recs)
 
             # Recall & NDCG (leave-one-out)
@@ -74,7 +74,7 @@ def evaluate_recs(
                 ndcgs.append(0.0)
 
             # Novelty: mean self-information of recommended items
-            if recs:
+            if len(recs) > 0:
                 nov = sum(self_info.get(m, default_self_info) for m in recs) / len(recs)
                 user_novelties.append(nov)
 
