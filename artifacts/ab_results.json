@@ -1,0 +1,27 @@
+{
+  "sample_size": 5000,
+  "control": {
+    "name": "Popularity Baseline",
+    "users": 2500,
+    "impressions": 25000,
+    "clicks": 2119,
+    "ctr": 0.0848,
+    "session_ctr": 0.6048
+  },
+  "treatment": {
+    "name": "Full Pipeline (Two-Tower + Ranker + MMR)",
+    "users": 2500,
+    "impressions": 25000,
+    "clicks": 2356,
+    "ctr": 0.0942,
+    "session_ctr": 0.6288
+  },
+  "relative_ctr_lift_pct": 11.18,
+  "session_ctr_lift_pct": 3.97,
+  "ci_95": [
+    0.0045,
+    0.0145
+  ],
+  "p_value": 0.000205,
+  "is_significant": true
+}
