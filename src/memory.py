@@ -1,8 +1,9 @@
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import pandas as pd
+from src.utils import clean_title
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DB_PATH = DATA_DIR / "memory.db"
@@ -40,20 +41,34 @@ class UserMemory:
             """)
             conn.commit()
 
-    def record_feedback(self, user_id: str, movie_id: int, feedback_type: str) -> bool:
+    def record_feedback(self, user_id: str, movie_id: int, feedback_type: str) -> Tuple[bool, str]:
         if feedback_type not in ("like", "dislike"):
             raise ValueError(f"Invalid feedback_type: {feedback_type}")
         with self.get_conn() as conn:
-            conn.execute("""
-                INSERT INTO feedback (user_id, movie_id, feedback_type, created_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(user_id, movie_id) DO UPDATE SET
-                    feedback_type = excluded.feedback_type,
-                    created_at = excluded.created_at
-            """, (str(user_id), int(movie_id), feedback_type, datetime.utcnow()))
+            cur = conn.execute(
+                "SELECT feedback_type FROM feedback WHERE user_id = ? AND movie_id = ?",
+                (str(user_id), int(movie_id)),
+            )
+            existing = cur.fetchone()
+            if existing:
+                if existing["feedback_type"] == feedback_type:
+                    return False, f"already {feedback_type}d"
+                # Updated from like to dislike or vice versa
+                conn.execute(
+                    "UPDATE feedback SET feedback_type = ?, created_at = ? WHERE user_id = ? AND movie_id = ?",
+                    (feedback_type, datetime.utcnow(), str(user_id), int(movie_id)),
+                )
+                conn.commit()
+                self.refresh_taste_summary(str(user_id))
+                return True, f"updated to {feedback_type}"
+
+            conn.execute(
+                "INSERT INTO feedback (user_id, movie_id, feedback_type, created_at) VALUES (?, ?, ?, ?)",
+                (str(user_id), int(movie_id), feedback_type, datetime.utcnow()),
+            )
             conn.commit()
         self.refresh_taste_summary(str(user_id))
-        return True
+        return True, f"recorded {feedback_type}"
 
     def get_feedback(self, user_id: str) -> Dict[str, List[int]]:
         with self.get_conn() as conn:
@@ -96,8 +111,8 @@ class UserMemory:
             movies_df = pd.read_parquet(DATA_DIR / "movies.parquet")
         meta = movies_df.set_index("movie_id").to_dict(orient="index")
 
-        liked_titles = [meta[m]["title"] for m in fb["liked"] if m in meta]
-        disliked_titles = [meta[m]["title"] for m in fb["disliked"] if m in meta]
+        liked_titles = [clean_title(meta[m]["title"]) for m in fb["liked"] if m in meta]
+        disliked_titles = [clean_title(meta[m]["title"]) for m in fb["disliked"] if m in meta]
 
         liked_genres = {}
         for m in fb["liked"]:

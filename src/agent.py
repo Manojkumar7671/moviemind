@@ -9,6 +9,7 @@ import pandas as pd
 
 from src.coldstart import ColdStartRecommender
 from src.memory import UserMemory
+from src.utils import clean_title, parse_genres
 
 load_dotenv()
 
@@ -65,8 +66,8 @@ class MovieMindAgent:
             if q in t_low or q in g_low or any(tok in t_low for tok in tokens):
                 matches.append({
                     "movie_id": int(mid),
-                    "title": meta["title"],
-                    "genres": meta["genres"],
+                    "title": clean_title(meta["title"]),
+                    "genres": parse_genres(meta["genres"]),
                     "year": int(meta["year"]),
                 })
             if len(matches) >= limit * 2:
@@ -88,8 +89,8 @@ class MovieMindAgent:
                         meta = self.movie_meta[mid]
                         recs.append({
                             "movie_id": int(mid),
-                            "title": meta["title"],
-                            "genres": meta["genres"],
+                            "title": clean_title(meta["title"]),
+                            "genres": parse_genres(meta["genres"]),
                             "year": int(meta["year"]),
                         })
                     if len(recs) >= n:
@@ -123,37 +124,46 @@ class MovieMindAgent:
             return {"error": f"Movie ID {movie_id} not found in catalog."}
 
         meta = self.movie_meta[movie_id]
-        m_genres = set(str(meta["genres"]).split("|"))
+        t_clean = clean_title(meta["title"])
+        m_genres = parse_genres(meta["genres"])
+        m_genres_set = set(m_genres)
         fb = self.memory.get_feedback(user_id)
 
-        # Check similarity with user liked movies
+        # Check similarity with user liked movies (exclude target movie itself)
         similar_liked = []
         if movie_id in self.mid_to_idx:
             target_vec = self.item_embs[self.mid_to_idx[movie_id]]
             for liked_id in fb["liked"]:
+                if liked_id == movie_id:
+                    continue  # Do not compare target movie to itself
                 if liked_id in self.mid_to_idx and liked_id in self.movie_meta:
                     l_vec = self.item_embs[self.mid_to_idx[liked_id]]
                     sim = float(np.dot(target_vec, l_vec))
                     l_meta = self.movie_meta[liked_id]
-                    shared = m_genres.intersection(set(str(l_meta["genres"]).split("|")))
+                    shared = m_genres_set.intersection(set(parse_genres(l_meta["genres"])))
                     similar_liked.append({
-                        "title": l_meta["title"],
+                        "title": clean_title(l_meta["title"]),
                         "cosine_similarity": round(sim, 3),
                         "shared_genres": list(shared),
                     })
 
         similar_liked.sort(key=lambda x: x["cosine_similarity"], reverse=True)
+        genre_str = ", ".join(m_genres)
+
+        if similar_liked:
+            sim_title = similar_liked[0]["title"]
+            explanation = f"'{t_clean}' ({meta['year']}) matches your interest in {genre_str}, similar to '{sim_title}' from your liked movies."
+        else:
+            explanation = f"'{t_clean}' ({meta['year']}) matches your interest in {genre_str}."
+
         return {
             "movie_id": movie_id,
-            "title": meta["title"],
-            "genres": meta["genres"],
+            "title": t_clean,
+            "genres": m_genres,
             "year": int(meta["year"]),
-            "shared_taste_profile": list(m_genres),
+            "shared_taste_profile": m_genres,
             "similar_liked_movies": similar_liked[:3],
-            "explanation": (
-                f"'{meta['title']}' ({meta['year']}) matches your preference for {meta['genres']}."
-                + (f" It is structurally similar to '{similar_liked[0]['title']}' you liked." if similar_liked else "")
-            ),
+            "explanation": explanation,
         }
 
     def filter_movies(
@@ -174,8 +184,8 @@ class MovieMindAgent:
                 continue
             results.append({
                 "movie_id": int(mid),
-                "title": meta["title"],
-                "genres": meta["genres"],
+                "title": clean_title(meta["title"]),
+                "genres": parse_genres(meta["genres"]),
                 "year": int(meta["year"]),
             })
             if len(results) >= limit:
@@ -194,11 +204,13 @@ class MovieMindAgent:
         }
 
     def record_feedback(self, user_id: str, movie_id: int, feedback_type: str) -> Dict[str, Any]:
-        """Store like or dislike for a movie."""
+        """Store like or dislike for a movie with duplicate prevention."""
         if movie_id not in self.movie_meta:
             return {"error": f"Movie ID {movie_id} does not exist."}
-        self.memory.record_feedback(user_id, movie_id, feedback_type)
-        title = self.movie_meta[movie_id]["title"]
+        title = clean_title(self.movie_meta[movie_id]["title"])
+        is_new, status_msg = self.memory.record_feedback(user_id, movie_id, feedback_type)
+        if not is_new and "already" in status_msg:
+            return {"status": "noop", "message": f"'{title}' is already {feedback_type}d."}
         return {"status": "success", "message": f"Recorded {feedback_type} for '{title}'."}
 
     # ================= DISPATCHER & CHAT =================
@@ -356,20 +368,20 @@ class MovieMindAgent:
             if "from" in low and yr:
                 min_y, max_y = yr, yr
             results = self.filter_movies(genre=genre_found, min_year=min_y, max_year=max_y, limit=5)
-            lines = [f"- **{r['title']}** ({r['year']}) - [{r['genres']}]" for r in results]
+            lines = [f"- **{r['title']}** ({r['year']}) - [{', '.join(r['genres'])}]" for r in results]
             return "**Filtered Movies:**\n" + ("\n".join(lines) if lines else "No movies matched your filter.")
 
         # Check for search
         if "search" in low or "find" in low:
             query = re.sub(r"^(search for|find|search)\s+", "", low).strip()
             results = self.search_movies(query, limit=5)
-            lines = [f"- **{r['title']}** ({r['year']}) [ID: {r['movie_id']}] - {r['genres']}" for r in results]
+            lines = [f"- **{r['title']}** ({r['year']}) [ID: {r['movie_id']}] - {', '.join(r['genres'])}" for r in results]
             return "**Search Results:**\n" + ("\n".join(lines) if lines else f"No movies found matching '{query}'.")
 
         # Default: recommend
         genres_to_rec = [g for g in ["Action", "Comedy", "Drama", "Sci-Fi", "Thriller", "Animation", "Romance"] if g.lower() in low]
         recs = self.recommend(user_id=user_id, genres=genres_to_rec or None, n=5)
-        lines = [f"{i+1}. **{r['title']}** ({r['year']}) - [{r['genres']}]" for i, r in enumerate(recs)]
+        lines = [f"{i+1}. **{r['title']}** ({r['year']}) - [{', '.join(r['genres'])}]" for i, r in enumerate(recs)]
         return f"**Recommended Movies for you:**\n" + "\n".join(lines)
 
     def chat(self, user_msg: str, user_id: str = "demo_user") -> str:

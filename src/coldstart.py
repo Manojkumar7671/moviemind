@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from src.baselines import ALL_GENRES
+from src.utils import clean_title, parse_genres
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "artifacts"
@@ -89,8 +90,8 @@ class ColdStartRecommender:
             m_info = self.movie_meta[mid]
             recs.append({
                 "movie_id": int(mid),
-                "title": m_info["title"],
-                "genres": m_info["genres"],
+                "title": clean_title(m_info["title"]),
+                "genres": parse_genres(m_info["genres"]),
                 "year": int(m_info["year"]),
                 "score": round(float(score), 4),
             })

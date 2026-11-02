@@ -100,9 +100,10 @@ def test_coldstart_returns_n_items():
         for r in recs:
             assert "movie_id" in r and isinstance(r["movie_id"], int)
             assert "title" in r and isinstance(r["title"], str)
-            assert "genres" in r and isinstance(r["genres"], str)
+            assert "genres" in r and isinstance(r["genres"], (list, tuple))
             assert "year" in r and isinstance(r["year"], int)
             assert "score" in r and isinstance(r["score"], float)
+            assert not r["title"].endswith(f"({r['year']})")
 
 # 5. Test: API smoke test
 def test_api_smoke_test():
@@ -131,7 +132,7 @@ def test_api_smoke_test():
     # Feedback
     r = client.post("/api/feedback", json={"user_id": "test_pytest", "movie_id": 260, "feedback_type": "like"})
     assert r.status_code == 200
-    assert r.json()["status"] == "success"
+    assert r.json()["status"] in ("success", "noop")
 
     # AB
     r = client.get("/api/ab")
@@ -146,3 +147,58 @@ def test_api_smoke_test():
     r = client.get("/ab")
     assert r.status_code == 200
     assert "A/B Test" in r.text
+
+# 6. Test: explain() excludes target movie from its own similar-to-liked list
+def test_explain_excludes_self():
+    from src.agent import MovieMindAgent
+    agent = MovieMindAgent()
+    uid = "test_self_exclude_user"
+
+    # Like movie 2571 (The Matrix)
+    agent.record_feedback(uid, 2571, "like")
+
+    # Explain movie 2571 for this user
+    res = agent.explain(2571, user_id=uid)
+    assert res["movie_id"] == 2571
+    # Target 2571 must NOT appear in its own similar_liked_movies
+    sim_titles = [m["title"] for m in res["similar_liked_movies"]]
+    assert "Matrix, The" not in sim_titles
+    assert len(res["similar_liked_movies"]) == 0
+    # Must cite genre match only
+    assert "similar to" not in res["explanation"]
+    assert "matches your interest in" in res["explanation"]
+
+# 7. Test: Onboarding rejects >5 genres
+def test_onboarding_genre_cap():
+    client = TestClient(app)
+    # 6 genres should fail
+    r = client.post("/api/onboarding", json={
+        "user_id": "test_cap_user",
+        "genres": ["Action", "Comedy", "Drama", "Sci-Fi", "Thriller", "Horror"]
+    })
+    assert r.status_code == 400
+    assert "5 genres" in r.json()["detail"]
+
+    # 5 genres should succeed
+    r2 = client.post("/api/onboarding", json={
+        "user_id": "test_cap_user",
+        "genres": ["Action", "Comedy", "Drama", "Sci-Fi", "Thriller"]
+    })
+    assert r2.status_code == 200
+    assert len(r2.json()["selected_genres"]) == 5
+
+# 8. Test: Duplicate like returns already liked
+def test_duplicate_like_returns_already_liked():
+    from src.agent import MovieMindAgent
+    agent = MovieMindAgent()
+    uid = "test_dup_user"
+
+    # First like
+    r1 = agent.record_feedback(uid, 1, "like")
+    assert r1["status"] == "success"
+    assert "Recorded like" in r1["message"]
+
+    # Duplicate like
+    r2 = agent.record_feedback(uid, 1, "like")
+    assert r2["status"] == "noop"
+    assert "already liked" in r2["message"]

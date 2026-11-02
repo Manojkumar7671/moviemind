@@ -51,6 +51,8 @@ def onboarding(req: OnboardingRequest):
     uid = req.user_id or "demo_user"
     if not req.genres:
         raise HTTPException(status_code=400, detail="Must select at least one genre")
+    if len(req.genres) > 5:
+        raise HTTPException(status_code=400, detail="Maximum 5 genres allowed. Please select up to 5.")
     recs = coldstart.recommend(req.genres, top_n=6)
     summary = f"User onboarded with favorite genres: {', '.join(req.genres)}."
     agent.memory.set_taste_summary(uid, summary, favorite_genres=",".join(req.genres))
