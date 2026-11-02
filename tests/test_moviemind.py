@@ -150,9 +150,10 @@ def test_api_smoke_test():
 
 # 6. Test: explain() excludes target movie from its own similar-to-liked list
 def test_explain_excludes_self():
+    import uuid
     from src.agent import MovieMindAgent
     agent = MovieMindAgent()
-    uid = "test_self_exclude_user"
+    uid = f"test_self_{uuid.uuid4().hex[:8]}"
 
     # Like movie 2571 (The Matrix)
     agent.record_feedback(uid, 2571, "like")
@@ -189,9 +190,10 @@ def test_onboarding_genre_cap():
 
 # 8. Test: Duplicate like returns already liked
 def test_duplicate_like_returns_already_liked():
+    import uuid
     from src.agent import MovieMindAgent
     agent = MovieMindAgent()
-    uid = "test_dup_user"
+    uid = f"test_dup_{uuid.uuid4().hex[:8]}"
 
     # First like
     r1 = agent.record_feedback(uid, 1, "like")
@@ -202,3 +204,57 @@ def test_duplicate_like_returns_already_liked():
     r2 = agent.record_feedback(uid, 1, "like")
     assert r2["status"] == "noop"
     assert "already liked" in r2["message"]
+
+# 9. Test: Phase 2 API recommendations schema & latency breakdown
+def test_api_recommend_schema_and_latency():
+    client = TestClient(app)
+    r = client.post("/api/recommend", json={"user_id": "demo_user", "genres": ["Action", "Sci-Fi"], "n": 4})
+    assert r.status_code == 200
+    data = r.json()
+
+    assert "recommendations" in data
+    assert len(data["recommendations"]) == 4
+
+    card = data["recommendations"][0]
+    assert "movie_id" in card
+    assert "title" in card and "(" not in card["title"]
+    assert "year" in card and isinstance(card["year"], int)
+    assert "genres" in card and isinstance(card["genres"], list)
+    assert "match_pct" in card and 50 <= card["match_pct"] <= 100
+    assert "score_parts" in card
+    for k in ("retrieval", "ranker", "diversity"):
+        assert k in card["score_parts"]
+    assert "explanation" in card
+    assert "matched_genres" in card["explanation"]
+    assert "similar_liked_movies" in card["explanation"]
+
+    # Latencies
+    assert "latency_ms" in data
+    for stage in ("retrieval", "ranker", "mmr", "llm", "total"):
+        assert stage in data["latency_ms"]
+        assert isinstance(data["latency_ms"][stage], (int, float))
+
+    # Trace
+    assert "trace" in data and len(data["trace"]) >= 4
+
+# 10. Test: Phase 2 Taste Map & Eval endpoints
+def test_api_taste_map_and_eval():
+    client = TestClient(app)
+
+    # Taste map
+    r_tm = client.get("/api/taste-map?user_id=demo_user")
+    assert r_tm.status_code == 200
+    tm_data = r_tm.json()
+    assert "points" in tm_data and len(tm_data["points"]) > 0
+    assert "user_point" in tm_data
+    assert "x" in tm_data["user_point"] and "y" in tm_data["user_point"]
+
+    # Eval endpoint
+    r_ev = client.get("/api/eval")
+    assert r_ev.status_code == 200
+    ev_data = r_ev.json()
+    assert "ablation_table" in ev_data
+    assert len(ev_data["ablation_table"]) == 4
+    assert "ab_test" in ev_data
+    assert ev_data["ab_test"]["badge"] == "SIMULATED"
+    assert "relative_ctr_lift_pct" in ev_data["ab_test"]
