@@ -298,6 +298,12 @@ class MovieMindAgent:
 
         user_liked_ids = list(fb["liked"])
 
+        # Real ranker scores min-max across the returned recommendations list
+        all_rk_scores = [float(ranked_scores.get(m, 0.5)) for m in reranked_ids]
+        min_rk = min(all_rk_scores) if all_rk_scores else 0.0
+        max_rk = max(all_rk_scores) if all_rk_scores else 1.0
+        rk_range = (max_rk - min_rk) if (max_rk - min_rk) > 1e-6 else 1.0
+
         for rank_idx, mid in enumerate(reranked_ids):
             meta = self.movie_meta[mid]
             clean_t = clean_title(meta["title"])
@@ -323,9 +329,13 @@ class MovieMindAgent:
 
             # Score parts
             r_val = round(ret_scores.get(mid, 0.70), 3)
-            rk_val = round(ranked_scores.get(mid, 0.75), 3)
+            raw_rk = float(ranked_scores.get(mid, 0.75))
+            rk_val = round(raw_rk, 3)
             div_val = round(0.7 * rk_val + 0.3 * (1.0 - (rank_idx * 0.04)), 3)
-            match_pct = min(98, max(76, int(82 + (rk_val * 16) - (rank_idx * 2))))
+
+            # Derive match_pct strictly from real ranker score (min-max across list), not rank
+            norm_rk = (raw_rk - min_rk) / rk_range if max_rk > min_rk else 0.85
+            match_pct = int(round(75 + (norm_rk * 23)))  # Scales from 75% to 98%
 
             # Short explanation
             if similar_titles:

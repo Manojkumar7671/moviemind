@@ -263,3 +263,24 @@ def test_api_taste_map_and_eval():
     assert "ab_test" in ev_data
     assert ev_data["ab_test"]["badge"] == "SIMULATED"
     assert "relative_ctr_lift_pct" in ev_data["ab_test"]
+
+# 11. Test: match_pct derived from real ranker score (min-max across list), not rank
+def test_match_pct_derived_from_ranker_score():
+    client = TestClient(app)
+    r = client.post("/api/recommend", json={"user_id": "demo_user", "genres": ["Action", "Sci-Fi"], "n": 6})
+    assert r.status_code == 200
+    cards = r.json()["recommendations"]
+    assert len(cards) == 6
+
+    rk_scores = [c["score_parts"]["ranker"] for c in cards]
+    match_pcts = [c["match_pct"] for c in cards]
+
+    # Highest ranker score maps to highest match_pct (98) and lowest to 75
+    assert max(match_pcts) == 98
+    assert min(match_pcts) == 75
+
+    # Any two items with identical ranker score have identical match_pct regardless of rank position
+    for i in range(len(cards)):
+        for j in range(i + 1, len(cards)):
+            if abs(rk_scores[i] - rk_scores[j]) < 1e-4:
+                assert match_pcts[i] == match_pcts[j]
