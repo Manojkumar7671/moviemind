@@ -90,27 +90,72 @@ class MovieMindAgent:
                 print(f"Warning: could not initialize OpenAI client: {e}")
 
     # ================= TOOLS =================
+    def clean_search_query(self, text: str) -> str:
+        """Strip conversational prefixes/suffixes to isolate title or search keywords."""
+        q = text.strip()
+        q = re.sub(r"[?!.]+$", "", q).strip()
+        prefixes = [
+            r"^(can you\s+)?(please\s+)?(find|search for|search|look up)\s+",
+            r"^i want to (see|watch)\s+",
+            r"^tell me about\s+",
+            r"^do you have\s+",
+            r"^what is\s+",
+            r"^show me\s+",
+            r"^is\s+",
+        ]
+        for p in prefixes:
+            q = re.sub(p, "", q, flags=re.IGNORECASE).strip()
+        q = re.sub(r"\s+movies?$", "", q, flags=re.IGNORECASE).strip()
+        q = re.sub(r"\s+films?$", "", q, flags=re.IGNORECASE).strip()
+        return q
+
     def search_movies(self, query: str, limit: int = 5) -> List[Dict]:
         """Search movies by title substring or keyword."""
-        q = query.lower().strip()
-        tokens = [t for t in re.split(r"\W+", q) if t and t not in ("movie", "movies", "film", "films")]
-        if not tokens:
-            tokens = [q]
+        clean_q = self.clean_search_query(query).lower().strip()
+        if not clean_q:
+            clean_q = query.lower().strip()
+        if not clean_q:
+            return []
 
+        # 1. Exact or substring match in clean title
         matches = []
         for mid, meta in self.movie_meta.items():
-            t_low = meta["title"].lower()
-            g_low = meta["genres"].lower()
-            if q in t_low or q in g_low or any(tok in t_low for tok in tokens):
+            t_low = clean_title(meta["title"]).lower()
+            if clean_q == t_low or (clean_q in t_low and not clean_q.isdigit()):
                 matches.append({
                     "movie_id": int(mid),
                     "title": clean_title(meta["title"]),
                     "genres": parse_genres(meta["genres"]),
                     "year": int(meta["year"]),
                 })
-            if len(matches) >= limit * 2:
+            elif len(clean_q) >= 4 and t_low in clean_q and not t_low.isdigit():
+                if re.search(r"\b" + re.escape(t_low) + r"\b", clean_q):
+                    matches.append({
+                        "movie_id": int(mid),
+                        "title": clean_title(meta["title"]),
+                        "genres": parse_genres(meta["genres"]),
+                        "year": int(meta["year"]),
+                    })
+            if len(matches) >= limit:
                 break
-        return matches[:limit]
+        if matches:
+            return matches
+
+        # 2. Token-based match (all significant non-numeric words must appear in title)
+        words = [w for w in re.split(r"\W+", clean_q) if len(w) >= 3 and not w.isdigit()]
+        if words:
+            for mid, meta in self.movie_meta.items():
+                t_low = clean_title(meta["title"]).lower()
+                if all(w in t_low for w in words):
+                    matches.append({
+                        "movie_id": int(mid),
+                        "title": clean_title(meta["title"]),
+                        "genres": parse_genres(meta["genres"]),
+                        "year": int(meta["year"]),
+                    })
+                if len(matches) >= limit:
+                    break
+        return matches
 
     def recommend(self, user_id: str, genres: Optional[List[str]] = None, n: int = 5) -> List[Dict]:
         """Generate personalized or genre-guided recommendations."""
@@ -602,8 +647,19 @@ class MovieMindAgent:
                 "is_adversarial": True,
             }
 
-        # Explain query
-        if "why" in low or "explain" in low:
+        # Intent 1: Greetings -> short reply, no tools
+        if re.search(r"^(hello|hi|hey|good\s+(morning|evening|afternoon)|howdy|greetings)\b", low):
+            return {
+                "tool": None,
+                "args": {},
+                "result": {},
+                "response": "Hello! Welcome to MovieMind screening room. How can I help you find or explore movies today?",
+                "safe": True,
+                "is_adversarial": False,
+            }
+
+        # Intent 2: Explain queries
+        if re.search(r"\b(why|explain)\b", low):
             mid = self.find_movie_id_in_text(low)
             if mid is not None:
                 exp = self.explain(mid, user_id=user_id)
@@ -625,8 +681,8 @@ class MovieMindAgent:
                     "is_adversarial": False,
                 }
 
-        # Feedback query
-        if any(w in low for w in ("like ", "liked ", "love ", "loved ", "dislike ", "disliked ", "hate ")):
+        # Intent 3: Feedback queries
+        if re.search(r"\b(like|liked|love|loved|dislike|disliked|hate|hated)\b", low):
             feedback_type = "dislike" if any(w in low for w in ("dislike", "hate")) else "like"
             mid = self.find_movie_id_in_text(low)
             if mid is not None:
@@ -640,7 +696,7 @@ class MovieMindAgent:
                     "is_adversarial": False,
                 }
 
-        # Taste profile
+        # Intent 4: Taste profile queries
         if any(w in low for w in ("taste", "profile", "history")):
             prof = self.get_taste_profile(user_id)
             return {
@@ -652,7 +708,7 @@ class MovieMindAgent:
                 "is_adversarial": False,
             }
 
-        # Filter query
+        # Intent 5: Filter queries
         year_match = re.search(r"\b(19\d{2}|20\d{2})\b", low)
         all_genres = ["Action", "Adventure", "Animation", "Children's", "Comedy", "Crime", "Documentary", "Drama", "Fantasy", "Film-Noir", "Horror", "Musical", "Mystery", "Romance", "Sci-Fi", "Thriller", "War", "Western"]
         matched_genre = next((g for g in all_genres if g.lower() in low), None)
@@ -673,33 +729,57 @@ class MovieMindAgent:
                 "is_adversarial": False,
             }
 
-        # Search query
-        if any(w in low for w in ("search", "find", "look up")):
-            q = re.sub(r"^(search for|find|search|look up)\s+", "", low).strip()
-            q = re.sub(r"\s+movies?$", "", q).strip()
-            results = self.search_movies(q, limit=5)
-            lines = [f"- **{r['title']}** ({r['year']}) [ID: {r['movie_id']}] - {', '.join(r['genres'])}" for r in results]
+        # Intent 6: Explicit Recommendation queries
+        is_rec_intent = (
+            any(w in low for w in ("recommend", "recommendation", "recommendations", "suggest", "suggestions", "what should i watch", "what to watch", "picks"))
+            or bool(re.search(r"\bgive me\s+(\d+\s+)?([a-z\s-]+\s+)?movies?\b", low))
+        )
+        if is_rec_intent:
+            n_match = re.search(r"\b(\d+)\b", low)
+            n_items = int(n_match.group(1)) if n_match else 5
+            n_items = min(max(n_items, 1), 20)
+            genres_to_rec = [g for g in all_genres if g.lower() in low]
+            recs = self.recommend(user_id=user_id, genres=genres_to_rec or None, n=n_items)
+            lines = [f"{i+1}. **{r['title']}** ({r['year']}) - [{', '.join(r['genres'])}]" for i, r in enumerate(recs)]
+            return {
+                "tool": "recommend",
+                "args": {"user_id": user_id, "genres": genres_to_rec or None, "n": n_items},
+                "result": recs,
+                "response": f"**Recommended Movies for you:**\n" + "\n".join(lines),
+                "safe": True,
+                "is_adversarial": False,
+            }
+
+        # Intent 7: Title / Search queries
+        search_triggers = ("search", "find", "look up", "i want to see", "i want to watch", "tell me about", "do you have", "is there", "show me")
+        is_search_intent = any(tr in low for tr in search_triggers)
+        clean_q = self.clean_search_query(msg)
+        is_known_title = bool(self.find_movie_id_in_text(clean_q or low))
+        is_short_title = len(clean_q.split()) <= 5 and not re.search(r"^(who|what|where|when|why|how)\b", low)
+
+        if is_search_intent or is_known_title or is_short_title:
+            q_term = clean_q if clean_q else msg
+            results = self.search_movies(q_term, limit=5)
+            if results:
+                lines = [f"- **{r['title']}** ({r['year']}) [ID: {r['movie_id']}] - {', '.join(r['genres'])}" for r in results]
+                resp = "**Search Results:**\n" + "\n".join(lines)
+            else:
+                resp = f"'{q_term}' is not in the MovieLens 1M catalog."
             return {
                 "tool": "search_movies",
-                "args": {"query": q, "limit": 5},
+                "args": {"query": q_term.lower()},
                 "result": results,
-                "response": "**Search Results:**\n" + ("\n".join(lines) if lines else f"No movies found matching '{q}'."),
+                "response": resp,
                 "safe": True,
                 "is_adversarial": len(results) == 0,
             }
 
-        # Recommend query
-        n_match = re.search(r"\b(\d+)\b", low)
-        n_items = int(n_match.group(1)) if n_match else 5
-        n_items = min(max(n_items, 1), 20)
-        genres_to_rec = [g for g in all_genres if g.lower() in low]
-        recs = self.recommend(user_id=user_id, genres=genres_to_rec or None, n=n_items)
-        lines = [f"{i+1}. **{r['title']}** ({r['year']}) - [{', '.join(r['genres'])}]" for i, r in enumerate(recs)]
+        # Intent 8: Unrecognized - Never default to recommend
         return {
-            "tool": "recommend",
-            "args": {"user_id": user_id, "genres": genres_to_rec or None, "n": n_items},
-            "result": recs,
-            "response": f"**Recommended Movies for you:**\n" + "\n".join(lines),
+            "tool": None,
+            "args": {},
+            "result": {},
+            "response": "I didn't recognize that movie title or request. You can search for movies (e.g. 'tell me about Aliens'), ask for recommendations by genre (e.g. 'recommend 4 sci-fi movies'), or check your taste profile.",
             "safe": True,
             "is_adversarial": False,
         }

@@ -222,7 +222,7 @@ def test_api_recommend_schema_and_latency():
 
     card = data["recommendations"][0]
     assert "movie_id" in card
-    assert "title" in card and "(" not in card["title"]
+    assert "title" in card and not card["title"].endswith(f"({card['year']})")
     assert "year" in card and isinstance(card["year"], int)
     assert "genres" in card and isinstance(card["genres"], list)
     assert "match_pct" in card and 50 <= card["match_pct"] <= 100
