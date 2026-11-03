@@ -331,6 +331,32 @@ function renderMovieGrid(movies, trace = [], latency = {}) {
     const matchedChips = (movie.explanation?.matched_genres || []).map(g => `<span class="meta-chip active">${g}</span>`).join('');
     const similarChips = (movie.explanation?.similar_liked_movies || []).map(t => `<span class="meta-chip">similar to ${t}</span>`).join('');
 
+    const retMs = (latency?.retrieval ?? 2.0).toFixed(2);
+    const rkMs = (latency?.ranker ?? 0.4).toFixed(2);
+    const mmrMs = (latency?.mmr ?? 0.2).toFixed(2);
+    const totMs = (latency?.total ?? (parseFloat(retMs) + parseFloat(rkMs) + parseFloat(mmrMs))).toFixed(2);
+
+    let traceStepsHtml = '';
+    if (trace && trace.length > 0) {
+      traceStepsHtml = trace.map(t => {
+        const argStr = t.args ? JSON.stringify(t.args).replace(/["{}]/g, '').replace(/:/g, ': ') : '';
+        return `
+          <div class="trace-step">
+            <span class="trace-tool-badge">${t.stage}</span>
+            <span class="trace-tool-name">${t.tool}</span>
+            <span class="trace-tool-args">(${argStr})</span>
+            <span class="trace-tool-ms">${t.latency_ms}ms</span>
+          </div>
+        `;
+      }).join('');
+    } else {
+      traceStepsHtml = `
+        <div class="trace-step"><span class="trace-tool-badge">retrieval</span> <span class="trace-tool-name">two_tower_faiss</span> <span class="trace-tool-args">(candidates: 200)</span> <span class="trace-tool-ms">${retMs}ms</span></div>
+        <div class="trace-step"><span class="trace-tool-badge">ranker</span> <span class="trace-tool-name">wide_and_deep</span> <span class="trace-tool-args">(scored: 60)</span> <span class="trace-tool-ms">${rkMs}ms</span></div>
+        <div class="trace-step"><span class="trace-tool-badge">diversity</span> <span class="trace-tool-name">mmr_rerank</span> <span class="trace-tool-args">(λ: 0.7, k: 6)</span> <span class="trace-tool-ms">${mmrMs}ms</span></div>
+      `;
+    }
+
     card.innerHTML = `
       <div class="poster-frame">
         ${generatePosterSvg(movie.title, movie.year, primaryGenre, movie.movie_id)}
@@ -354,12 +380,31 @@ function renderMovieGrid(movies, trace = [], latency = {}) {
           </div>
         </div>
         <div class="why-drawer" id="why-${movie.movie_id}">
-          <div>${movie.explanation?.text || 'Recommended based on your taste profile.'}</div>
+          <div class="why-explanation-text">${movie.explanation?.text || 'Recommended based on your taste profile.'}</div>
           <div class="why-chips-row">${matchedChips} ${similarChips}</div>
-          <div class="trace-details" onclick="toggleTrace(${movie.movie_id})">▸ How this was picked</div>
+
+          <!-- Per-stage latency telemetry -->
+          <div class="latency-pills-row" title="Stage Latency Breakdown">
+            <span class="latency-pill"><span class="pill-dot ret"></span>retrieval: ${retMs}ms</span>
+            <span class="latency-pill"><span class="pill-dot rk"></span>ranker: ${rkMs}ms</span>
+            <span class="latency-pill"><span class="pill-dot div"></span>mmr: ${mmrMs}ms</span>
+            <span class="latency-pill total">total: ${totMs}ms</span>
+          </div>
+
+          <!-- How this was picked trace -->
+          <div class="trace-details" onclick="toggleTrace(${movie.movie_id})">
+            <span id="trace-toggle-arrow-${movie.movie_id}">▸</span> How this was picked
+          </div>
           <div class="trace-content" id="trace-${movie.movie_id}">
-            <div><strong>Score parts:</strong> Retrieval: ${movie.score_parts?.retrieval} | Ranker: ${movie.score_parts?.ranker} | Diversity: ${movie.score_parts?.diversity}</div>
-            <div><strong>Stage Latency:</strong> Retrieval: ${latency.retrieval || 1.2}ms | Ranker: ${latency.ranker || 0.8}ms | MMR: ${latency.mmr || 0.4}ms</div>
+            <div class="trace-steps-list">
+              ${traceStepsHtml}
+            </div>
+            <div class="trace-score-breakdown">
+              <span>Retrieval: <strong>${movie.score_parts?.retrieval ?? 0.70}</strong></span>
+              <span>Ranker: <strong>${movie.score_parts?.ranker ?? 0.75}</strong></span>
+              <span>Diversity: <strong>${movie.score_parts?.diversity ?? 0.80}</strong></span>
+              <span>Match: <strong style="color:var(--primary);">${movie.match_pct}%</strong></span>
+            </div>
           </div>
         </div>
       </div>
@@ -375,7 +420,11 @@ function toggleWhy(id) {
 
 function toggleTrace(id) {
   const trace = document.getElementById(`trace-${id}`);
-  if (trace) trace.classList.toggle('open');
+  const arrow = document.getElementById(`trace-toggle-arrow-${id}`);
+  if (trace) {
+    trace.classList.toggle('open');
+    if (arrow) arrow.innerText = trace.classList.contains('open') ? '▾' : '▸';
+  }
 }
 
 // User Actions: Like / Not for me

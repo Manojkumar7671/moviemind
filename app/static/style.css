@@ -523,8 +523,14 @@ main.app-viewport {
 .trace-details {
   margin-top: var(--space-2);
   font-size: 11px;
-  color: var(--muted);
+  color: var(--primary);
   cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+}
+
+.trace-details:hover {
+  text-decoration: underline;
 }
 
 .trace-content {
@@ -533,13 +539,109 @@ main.app-viewport {
   font-size: 10px;
   background: var(--surface);
   padding: var(--space-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  margin-top: 4px;
+  margin-top: 6px;
   line-height: 1.4;
 }
 
 .trace-content.open {
   display: block;
+}
+
+.latency-pills-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+
+.latency-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-family: monospace;
+}
+
+.latency-pill.total {
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.pill-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.pill-dot.ret { background: #38bdf8; }
+.pill-dot.rk { background: #818cf8; }
+.pill-dot.div { background: var(--retro); }
+
+.trace-steps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.trace-step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--text);
+}
+
+.trace-tool-badge {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  padding: 1px 4px;
+  border-radius: 2px;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+}
+
+.trace-tool-name {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.trace-tool-args {
+  color: var(--muted);
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+.trace-tool-ms {
+  color: var(--retro);
+  margin-left: auto;
+  font-weight: 600;
+}
+
+.trace-score-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+  color: var(--muted);
 }
 
 /* Taste Map View */
