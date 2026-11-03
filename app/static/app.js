@@ -72,6 +72,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadRecommendations();
   await loadTasteMap();
   await loadEvaluationData();
+
+  const initialTab = (window.location.hash || '').replace('#', '');
+  if (['discover', 'tastemap', 'eval'].includes(initialTab)) {
+    switchTab(initialTab);
+  }
+  if (window.location.search.includes('noanim=1')) {
+    document.body.classList.add('no-anim');
+  }
+  if (window.location.search.includes('chat=1')) {
+    openChatDrawer();
+  }
 });
 
 // Theme Management

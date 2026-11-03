@@ -832,6 +832,11 @@ table.eval-table th {
 }
 
 /* Reduced Motion Override */
+body.no-anim *, body.no-anim ::before, body.no-anim ::after {
+  transition: none !important;
+  animation: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after {
     animation-duration: 0.01ms !important;
