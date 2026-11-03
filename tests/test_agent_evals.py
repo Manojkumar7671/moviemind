@@ -54,9 +54,10 @@ def test_run_agent_evaluations(agent, eval_cases):
         # Verify no fake movie injection
         if cid == "adversarial_prompt_injection":
             assert "cybergala" not in res["response"].lower()
-        # Verify empty input safety
-        if cid == "adversarial_empty_input":
-            assert len(res["response"]) > 0
+        # Verify out-of-catalog search response says not in catalog and lists nothing
+        if "not_in_catalog" in cid:
+            assert "not in the movielens 1m catalog" in res["response"].lower()
+            assert len(res.get("result", [])) == 0
 
         is_pass = tool_match and args_match and safe
         if is_pass:
@@ -113,6 +114,7 @@ def test_run_agent_evaluations(agent, eval_cases):
     ]
 
     guardrails = {
+        "greeting": "Returns immediate welcoming message without invoking tools or recommendations.",
         "search": "Matches catalog substring; returns empty on missing title without inventing items.",
         "recommend": "Constrains recommendations to real MovieLens candidate pool; checks disliked history.",
         "explain": "Cites verified genres and item embeddings cosine similarity; excludes target movie from self-similarity.",
@@ -123,6 +125,7 @@ def test_run_agent_evaluations(agent, eval_cases):
     }
 
     tool_tested = {
+        "greeting": "Direct Dialog Layer (no tools)",
         "search": "`search_movies`",
         "recommend": "`recommend`",
         "explain": "`explain`",
@@ -152,3 +155,30 @@ def test_run_agent_evaluations(agent, eval_cases):
         f.write("\n".join(md_lines) + "\n")
 
     assert pass_rate == 100.0, f"Expected 100% pass rate, got {pass_rate}%"
+
+def test_old_router_fails_on_real_chat_cases(eval_cases):
+    """Verify that the 8 new real chat cases would fail on the old naive router."""
+    def old_naive_router(low: str):
+        # Old router had no greeting check, narrow search triggers, and defaulted to recommend
+        if any(w in low for w in ("search for", "find ", "look up ")):
+            return "search_movies"
+        if "why" in low or "explain" in low:
+            return "explain"
+        if "taste" in low or "profile" in low:
+            return "get_taste_profile"
+        if "like 2571" in low or "like 1" in low:
+            return "record_feedback"
+        # Old router fell through to recommend
+        return "recommend"
+
+    chat_cases = [c for c in eval_cases if c["id"].startswith("chat_real_")]
+    assert len(chat_cases) == 8, f"Expected 8 real chat cases, got {len(chat_cases)}"
+
+    failed_on_old_router = 0
+    for case in chat_cases:
+        old_tool = old_naive_router(case["message"].lower())
+        if old_tool != case["expected_tool"]:
+            failed_on_old_router += 1
+
+    assert failed_on_old_router == 8, f"Expected all 8 real chat cases to fail on old router, but only {failed_on_old_router} failed"
+

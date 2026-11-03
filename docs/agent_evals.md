@@ -1,19 +1,20 @@
 # MovieMind Agent Evaluation Suite
 
-**Overall Pass Rate**: 24/24 (100.0%)
+**Overall Pass Rate**: 32/32 (100.0%)
 **Adversarial & Anti-Hallucination Pass Rate**: 4/4 (100.0%)
 
 ## Pass Rate by Category
 
 | Category | Cases | Passed | Pass Rate | Tool Tested | Anti-Hallucination Guardrail |
 | :--- | :---: | :---: | :---: | :--- | :--- |
-| Search | 4 | 4 | **100.0%** | `search_movies` | Matches catalog substring; returns empty on missing title without inventing items. |
+| Search | 9 | 9 | **100.0%** | `search_movies` | Matches catalog substring; returns empty on missing title without inventing items. |
 | Recommend | 4 | 4 | **100.0%** | `recommend` | Constrains recommendations to real MovieLens candidate pool; checks disliked history. |
 | Explain | 4 | 4 | **100.0%** | `explain` | Cites verified genres and item embeddings cosine similarity; excludes target movie from self-similarity. |
 | Filter | 4 | 4 | **100.0%** | `filter_movies` | Enforces strict release year boundaries and verified MovieLens genres. |
-| Feedback | 3 | 3 | **100.0%** | `record_feedback` | Idempotent SQLite storage; prevents duplicate like/dislike inserts. |
+| Feedback | 4 | 4 | **100.0%** | `record_feedback` | Idempotent SQLite storage; prevents duplicate like/dislike inserts. |
 | Profile | 1 | 1 | **100.0%** | `get_taste_profile` | Grounds summary in recorded user feedback statistics without speculative claims. |
 | Adversarial | 4 | 4 | **100.0%** | Safety & Rejection Layer | Rejects empty queries, handles prompt injection, and reports catalog misses truthfully. |
+| Greeting | 2 | 2 | **100.0%** | Direct Dialog Layer (no tools) | Returns immediate welcoming message without invoking tools or recommendations. |
 
 ## Adversarial Evaluation Details
 

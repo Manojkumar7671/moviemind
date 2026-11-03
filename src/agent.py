@@ -105,6 +105,8 @@ class MovieMindAgent:
         ]
         for p in prefixes:
             q = re.sub(p, "", q, flags=re.IGNORECASE).strip()
+        q = re.sub(r"\s+available$", "", q, flags=re.IGNORECASE).strip()
+        q = re.sub(r"\s+in (the )?catalog$", "", q, flags=re.IGNORECASE).strip()
         q = re.sub(r"\s+movies?$", "", q, flags=re.IGNORECASE).strip()
         q = re.sub(r"\s+films?$", "", q, flags=re.IGNORECASE).strip()
         return q

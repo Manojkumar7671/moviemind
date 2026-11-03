@@ -244,5 +244,90 @@
     },
     "adversarial": true,
     "description": "Movie not in MovieLens 1M catalog must return empty/not found, no hallucinated ID"
+  },
+  {
+    "id": "chat_real_hello",
+    "category": "greeting",
+    "message": "hello",
+    "expected_tool": null,
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Greeting query: should reply politely without triggering tools or recommendations"
+  },
+  {
+    "id": "chat_real_hi_there",
+    "category": "greeting",
+    "message": "hi there",
+    "expected_tool": null,
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Greeting query: should reply politely without triggering tools or recommendations"
+  },
+  {
+    "id": "chat_real_batman_movies",
+    "category": "search",
+    "message": "i want to see batman movies",
+    "expected_tool": "search_movies",
+    "expected_args": {
+      "query": "batman"
+    },
+    "adversarial": false,
+    "description": "Search intent: natural phrasing requesting a specific franchise"
+  },
+  {
+    "id": "chat_real_tell_about_aliens",
+    "category": "search",
+    "message": "tell me about Aliens",
+    "expected_tool": "search_movies",
+    "expected_args": {
+      "query": "aliens"
+    },
+    "adversarial": false,
+    "description": "Search intent: natural phrasing asking about a specific movie title"
+  },
+  {
+    "id": "chat_real_loved_total_recall",
+    "category": "feedback",
+    "message": "I loved Total Recall",
+    "expected_tool": "record_feedback",
+    "expected_args": {
+      "movie_id": 2916,
+      "feedback_type": "like"
+    },
+    "adversarial": false,
+    "description": "Feedback intent: natural positive sentiment for a multi-word title"
+  },
+  {
+    "id": "chat_real_title_matrix",
+    "category": "search",
+    "message": "The Matrix",
+    "expected_tool": "search_movies",
+    "expected_args": {
+      "query": "the matrix"
+    },
+    "adversarial": false,
+    "description": "Title lookup: direct entry of canonical movie title"
+  },
+  {
+    "id": "chat_real_have_pulp_fiction",
+    "category": "search",
+    "message": "do you have Pulp Fiction?",
+    "expected_tool": "search_movies",
+    "expected_args": {
+      "query": "pulp fiction"
+    },
+    "adversarial": false,
+    "description": "Search intent: conversational availability query"
+  },
+  {
+    "id": "chat_real_casablanca_available",
+    "category": "search",
+    "message": "is Casablanca available?",
+    "expected_tool": "search_movies",
+    "expected_args": {
+      "query": "casablanca"
+    },
+    "adversarial": false,
+    "description": "Search intent: natural phrasing asking if a specific classic title is in catalog"
   }
 ]
