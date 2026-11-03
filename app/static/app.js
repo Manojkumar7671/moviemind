@@ -149,6 +149,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (window.location.search.includes('chat=1')) {
     openChatDrawer();
   }
+  if (window.location.search.includes('expand=1') && state.movies.length > 0) {
+    toggleWhy(state.movies[0].movie_id);
+    toggleTrace(state.movies[0].movie_id);
+  }
 });
 
 // Theme Management
