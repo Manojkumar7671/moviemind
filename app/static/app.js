@@ -15,50 +15,116 @@ const state = {
   isDrawerOpen: false,
 };
 
-// Genre Color Themes for Posters
+// Genre Color Themes for Posters (Distinct hue per genre)
 const GENRE_COLORS = {
-  Action: { bg1: '#7F1D1D', bg2: '#B45309', pattern: 'grid' },
-  Adventure: { bg1: '#065F46', bg2: '#0D9488', pattern: 'radial' },
-  Animation: { bg1: '#047857', bg2: '#10B981', pattern: 'dots' },
-  "Children's": { bg1: '#1D4ED8', bg2: '#3B82F6', pattern: 'stripes' },
-  Comedy: { bg1: '#B45309', bg2: '#F59E0B', pattern: 'diagonal' },
-  Crime: { bg1: '#374151', bg2: '#1F2937', pattern: 'grid' },
-  Documentary: { bg1: '#1E293B', bg2: '#475569', pattern: 'lines' },
-  Drama: { bg1: '#4C1D95', bg2: '#312E81', pattern: 'curtain' },
-  Fantasy: { bg1: '#5B21B6', bg2: '#7C3AED', pattern: 'radial' },
-  "Film-Noir": { bg1: '#111827', bg2: '#374151', pattern: 'shadows' },
-  Horror: { bg1: '#881337', bg2: '#18181B', pattern: 'slits' },
-  Musical: { bg1: '#831843', bg2: '#BE185D', pattern: 'stripes' },
-  Mystery: { bg1: '#312E81', bg2: '#4338CA', pattern: 'concentric' },
-  Romance: { bg1: '#9D174D', bg2: '#E11D48', pattern: 'diagonal' },
-  "Sci-Fi": { bg1: '#1E3A8A', bg2: '#0284C7', pattern: 'rings' },
-  Thriller: { bg1: '#1F2937', bg2: '#991B1B', pattern: 'slits' },
-  War: { bg1: '#3F3F46', bg2: '#78350F', pattern: 'cross' },
-  Western: { bg1: '#78350F', bg2: '#B45309', pattern: 'desert' },
+  Action: { bg1: '#881337', bg2: '#E11D48', hue: 'crimson' },
+  Adventure: { bg1: '#064E3B', bg2: '#059669', hue: 'forest' },
+  Animation: { bg1: '#047857', bg2: '#10B981', hue: 'emerald' },
+  "Children's": { bg1: '#1E40AF', bg2: '#3B82F6', hue: 'blue' },
+  Comedy: { bg1: '#B45309', bg2: '#F59E0B', hue: 'amber' },
+  Crime: { bg1: '#374151', bg2: '#1F2937', hue: 'slate' },
+  Documentary: { bg1: '#451A03', bg2: '#78350F', hue: 'bronze' },
+  Drama: { bg1: '#4C1D95', bg2: '#312E81', hue: 'indigo' },
+  Fantasy: { bg1: '#581C87', bg2: '#7C3AED', hue: 'purple' },
+  "Film-Noir": { bg1: '#030712', bg2: '#374151', hue: 'monochrome' },
+  Horror: { bg1: '#450A0A', bg2: '#991B1B', hue: 'blood' },
+  Musical: { bg1: '#831843', bg2: '#DB2777', hue: 'pink' },
+  Mystery: { bg1: '#1E1B4B', bg2: '#4338CA', hue: 'sapphire' },
+  Romance: { bg1: '#9D174D', bg2: '#F43F5E', hue: 'rose' },
+  "Sci-Fi": { bg1: '#082F49', bg2: '#0284C7', hue: 'cyan' },
+  Thriller: { bg1: '#18181B', bg2: '#7F1D1D', hue: 'carmine' },
+  War: { bg1: '#27272A', bg2: '#713F12', hue: 'khaki' },
+  Western: { bg1: '#7C2D12', bg2: '#D97706', hue: 'terracotta' },
 };
 
-// SVG Poster Pattern Generator
-function generatePosterSvg(title, year, primaryGenre) {
-  const theme = GENRE_COLORS[primaryGenre] || { bg1: '#1E293B', bg2: '#334155', pattern: 'grid' };
+// SVG Poster Pattern Generator (Tinted by primary genre hue, pattern varied by movie_id)
+function generatePosterSvg(title, year, primaryGenre, movieId = 0) {
+  const theme = GENRE_COLORS[primaryGenre] || { bg1: '#1E293B', bg2: '#334155' };
+  const safeGenre = (primaryGenre || 'film').replace(/[^a-zA-Z0-9]/g, '');
+  const mid = Math.abs(parseInt(movieId, 10) || 0);
+
+  const patType = mid % 6;
+  const rot = (mid * 47) % 360;
+  const cx = 150 + ((mid * 17) % 50 - 25);
+  const cy = 175 + ((mid * 23) % 60 - 30);
+  const r1 = 65 + ((mid * 19) % 35);
+  const r2 = r1 + 32;
+
+  let patternDef = '';
+  let patternArt = '';
+
+  if (patType === 0) {
+    // Motif 0: Concentric film reels and orbit rings
+    patternArt = `
+      <circle cx="${cx}" cy="${cy}" r="${r1}" fill="none" stroke="#EDE8DC" stroke-width="1.5" stroke-dasharray="4 8" opacity="0.32" transform="rotate(${rot} ${cx} ${cy})" />
+      <circle cx="${cx}" cy="${cy}" r="${r2}" fill="none" stroke="#EDE8DC" stroke-width="1" opacity="0.2" />
+      <circle cx="${cx}" cy="${cy}" r="14" fill="#EDE8DC" opacity="0.2" />
+    `;
+  } else if (patType === 1) {
+    // Motif 1: Radial starburst & astronomical coordinates
+    patternArt = `
+      <g stroke="#EDE8DC" stroke-width="1.2" opacity="0.25" transform="rotate(${rot} ${cx} ${cy})">
+        <line x1="${cx - r2}" y1="${cy}" x2="${cx + r2}" y2="${cy}" />
+        <line x1="${cx}" y1="${cy - r2}" x2="${cx}" y2="${cy + r2}" />
+        <line x1="${cx - r1}" y1="${cy - r1}" x2="${cx + r1}" y2="${cy + r1}" stroke-dasharray="3 5" />
+        <line x1="${cx - r1}" y1="${cy + r1}" x2="${cx + r1}" y2="${cy - r1}" stroke-dasharray="3 5" />
+        <circle cx="${cx}" cy="${cy}" r="${r1}" fill="none" stroke-width="1" />
+      </g>
+    `;
+  } else if (patType === 2) {
+    // Motif 2: Geometric architectural slits & square aperture
+    patternDef = `
+      <pattern id="pat-${mid}" width="28" height="28" patternUnits="userSpaceOnUse" patternTransform="rotate(${rot})">
+        <line x1="0" y1="0" x2="28" y2="28" stroke="#EDE8DC" stroke-width="1.2" opacity="0.14" />
+      </pattern>
+    `;
+    patternArt = `
+      <rect width="100%" height="100%" fill="url(#pat-${mid})" />
+      <rect x="${cx - 65}" y="${cy - 65}" width="130" height="130" fill="none" stroke="#EDE8DC" stroke-width="1.5" opacity="0.26" transform="rotate(${rot} ${cx} ${cy})" />
+    `;
+  } else if (patType === 3) {
+    // Motif 3: Kinetic diamond compass prism
+    patternArt = `
+      <polygon points="${cx},${cy - r2} ${cx + r1},${cy} ${cx},${cy + r2} ${cx - r1},${cy}" fill="none" stroke="#EDE8DC" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.3" transform="rotate(${rot} ${cx} ${cy})" />
+      <polygon points="${cx},${cy - r1 * 0.6} ${cx + r1 * 0.6},${cy} ${cx},${cy + r1 * 0.6} ${cx - r1 * 0.6},${cy}" fill="#EDE8DC" opacity="0.14" transform="rotate(${rot} ${cx} ${cy})" />
+    `;
+  } else if (patType === 4) {
+    // Motif 4: Halftone matrix with circular target
+    patternDef = `
+      <pattern id="pat-${mid}" width="24" height="24" patternUnits="userSpaceOnUse">
+        <circle cx="12" cy="12" r="1.5" fill="#EDE8DC" opacity="0.15" />
+      </pattern>
+    `;
+    patternArt = `
+      <rect width="100%" height="100%" fill="url(#pat-${mid})" />
+      <circle cx="${cx}" cy="${cy}" r="${r1}" fill="none" stroke="#EDE8DC" stroke-width="2" opacity="0.32" />
+      <rect x="${cx - 45}" y="${cy - 45}" width="90" height="90" fill="none" stroke="#EDE8DC" stroke-width="1" stroke-dasharray="4 6" opacity="0.22" transform="rotate(${rot} ${cx} ${cy})" />
+    `;
+  } else {
+    // Motif 5: Topographic contour horizons
+    patternArt = `
+      <ellipse cx="${cx}" cy="${cy}" rx="${r2}" ry="${r1 * 0.65}" fill="none" stroke="#EDE8DC" stroke-width="1.5" stroke-dasharray="5 5" opacity="0.28" transform="rotate(${rot} ${cx} ${cy})" />
+      <ellipse cx="${cx}" cy="${cy}" rx="${r1 * 0.75}" ry="${r2 * 0.85}" fill="none" stroke="#EDE8DC" stroke-width="1" opacity="0.18" transform="rotate(${rot + 40} ${cx} ${cy})" />
+      <circle cx="${cx}" cy="${cy}" r="10" fill="#EDE8DC" opacity="0.22" />
+    `;
+  }
+
   return `
     <svg class="poster-svg-art" viewBox="0 0 300 450" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
       <defs>
-        <linearGradient id="grad-${primaryGenre}" x1="0%" y1="0%" x2="100%" y2="100%">
+        <linearGradient id="grad-${mid}-${safeGenre}" x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stop-color="${theme.bg1}" />
           <stop offset="100%" stop-color="${theme.bg2}" />
         </linearGradient>
-        <pattern id="pat-${primaryGenre}" width="40" height="40" patternUnits="userSpaceOnUse">
-          <circle cx="20" cy="20" r="1.5" fill="#EDE8DC" opacity="0.12" />
-        </pattern>
-        <linearGradient id="overlayFade" x1="0%" y1="40%" x2="0%" y2="100%">
+        <linearGradient id="overlayFade-${mid}" x1="0%" y1="35%" x2="0%" y2="100%">
           <stop offset="0%" stop-color="transparent" />
           <stop offset="100%" stop-color="#0C1018" stop-opacity="0.95" />
         </linearGradient>
+        ${patternDef}
       </defs>
-      <rect width="100%" height="100%" fill="url(#grad-${primaryGenre})" />
-      <rect width="100%" height="100%" fill="url(#pat-${primaryGenre})" />
-      <circle cx="150" cy="180" r="90" fill="none" stroke="#EDE8DC" stroke-width="1.5" stroke-dasharray="4 6" opacity="0.25" />
-      <rect width="100%" height="100%" fill="url(#overlayFade)" />
+      <rect width="100%" height="100%" fill="url(#grad-${mid}-${safeGenre})" />
+      ${patternArt}
+      <rect width="100%" height="100%" fill="url(#overlayFade-${mid})" />
     </svg>
   `;
 }
@@ -267,7 +333,7 @@ function renderMovieGrid(movies, trace = [], latency = {}) {
 
     card.innerHTML = `
       <div class="poster-frame">
-        ${generatePosterSvg(movie.title, movie.year, primaryGenre)}
+        ${generatePosterSvg(movie.title, movie.year, primaryGenre, movie.movie_id)}
         <div class="poster-content">
           <div class="poster-header">
             <span class="poster-year">${movie.year}</span>
