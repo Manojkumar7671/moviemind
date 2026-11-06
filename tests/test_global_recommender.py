@@ -103,3 +103,32 @@ def test_global_api_endpoints():
     assert why_res.status_code == 200
     why_data = why_res.json()
     assert "1954" in why_data["text"] or "JP" in why_data["text"] or "Seven Samurai" in why_data["text"]
+
+def test_chat_filter_movies_with_region_and_language():
+    from src.agent import MovieMindAgent
+    agent = MovieMindAgent()
+
+    # 1. Year range comes from data
+    assert agent.data_min_year <= 1920
+    assert agent.data_max_year >= 2020
+
+    # 2. Filter by region and genre
+    jp_movies = agent.filter_movies(region="JP", genre="Drama", limit=5)
+    assert len(jp_movies) > 0
+    for m in jp_movies:
+        assert m["approx_origin_region"] == "JP"
+        assert any("Drama" in g for g in m["genres"])
+
+    # 3. Filter by language and exact year
+    fr_movies = agent.filter_movies(language="fr", year=1995, limit=5)
+    assert len(fr_movies) > 0
+    for m in fr_movies:
+        assert m["year"] == 1995
+        assert "fr" in [l.lower() for l in m["languages"]]
+
+    # 4. Chat router routes regional queries to filter_movies
+    chat_res = agent.route_message("filter Japanese movies from 1956")
+    assert chat_res["tool"] == "filter_movies"
+    assert chat_res["args"]["region"] == "JP"
+    assert chat_res["args"]["year"] == 1956
+    assert any("The Burmese Harp" in r["title"] or "Burmese Harp" in r["title"] for r in chat_res["result"])
