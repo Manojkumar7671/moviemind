@@ -37,8 +37,20 @@ const GENRE_COLORS = {
   Western: { bg1: '#7C2D12', bg2: '#D97706', hue: 'terracotta' },
 };
 
+function normalizeTitle(title) {
+  if (!title) return '';
+  let t = String(title).replace(/\s*\(\d{4}\)$/, '').trim();
+  const m = t.match(/^(.*?),\s*(The|A|An)$/i);
+  if (m) {
+    const art = m[2].charAt(0).toUpperCase() + m[2].slice(1).toLowerCase();
+    return `${art} ${m[1].trim()}`;
+  }
+  return t;
+}
+
 // SVG Poster Pattern Generator (Tinted by primary genre hue, pattern varied by movie_id)
 function generatePosterSvg(title, year, primaryGenre, movieId = 0) {
+  const normTitle = normalizeTitle(title);
   const theme = GENRE_COLORS[primaryGenre] || { bg1: '#1E293B', bg2: '#334155' };
   const safeGenre = (primaryGenre || 'film').replace(/[^a-zA-Z0-9]/g, '');
   const mid = Math.abs(parseInt(movieId, 10) || 0);

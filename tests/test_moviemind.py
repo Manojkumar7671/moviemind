@@ -168,6 +168,7 @@ def test_explain_excludes_self():
     assert res["movie_id"] == 2571
     # Target 2571 must NOT appear in its own similar_liked_movies
     sim_titles = [m["title"] for m in res["similar_liked_movies"]]
+    assert "The Matrix" not in sim_titles
     assert "Matrix, The" not in sim_titles
     assert len(res["similar_liked_movies"]) == 0
     # Must cite genre match only
@@ -306,3 +307,18 @@ def test_match_pct_derived_from_ranker_score():
         for j in range(i + 1, len(cards)):
             if abs(rk_scores[i] - rk_scores[j]) < 1e-4:
                 assert match_pcts[i] == match_pcts[j]
+
+# 12. Test: Normalize titles "X, The/A/An" -> "The X"
+def test_title_normalization_articles():
+    from src.utils import clean_title
+    from src.agent import MovieMindAgent
+    assert clean_title("Matrix, The (1999)") == "The Matrix"
+    assert clean_title("Godfather, The (1972)") == "The Godfather"
+    assert clean_title("Clockwork Orange, A (1971)") == "A Clockwork Orange"
+    assert clean_title("Affair to Remember, An (1957)") == "An Affair to Remember"
+    assert clean_title("Toy Story (1995)") == "Toy Story"
+
+    agent = MovieMindAgent()
+    results = agent.search_movies("Matrix", limit=3)
+    assert any(r["title"] == "The Matrix" for r in results)
+    assert not any(r["title"].endswith(", The") for r in results)
