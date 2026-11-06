@@ -739,9 +739,21 @@ async function loadEvaluationData() {
     const total = ev.total_cases ?? 47;
 
     const elSum = document.getElementById('agentEvalSummary');
-    if (elSum) elSum.innerText = `LLM Agent: ${llmPct}%`;
+    if (elSum) elSum.innerText = `LLM Agent (Held-Out): ${llmPct}%`;
     const elFb = document.getElementById('agentEvalFallbackSummary');
     if (elFb) elFb.innerText = `Fallback Router: ${fbPct}%`;
+
+    const diffNotice = document.getElementById('differingCatsNotice');
+    if (diffNotice) {
+      if (ev.differing_categories && ev.differing_categories.length > 0) {
+        const diffList = ev.differing_categories.map(d => `${d.category} (LLM: ${d.llm_pass_rate_pct}%, FB: ${d.fallback_pass_rate_pct}%)`).join(', ');
+        diffNotice.innerText = `Differ in ${ev.differing_categories.length} categories: ${diffList}`;
+        diffNotice.style.color = 'var(--primary)';
+      } else {
+        diffNotice.innerText = '0 differences (identical 100% agreement)';
+        diffNotice.style.color = '#10B981';
+      }
+    }
 
     const evTbody = document.getElementById('agentEvalTbody');
     const categories = (ev.fallback_router?.categories) ? Object.keys(ev.fallback_router.categories) : null;

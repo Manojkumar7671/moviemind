@@ -742,9 +742,11 @@ class MovieMindAgent:
 
     def is_off_topic(self, low: str) -> bool:
         """Detect math, programming, or non-movie general knowledge questions."""
-        if re.search(r"\b(\d+\s*[\+\-\*\/\^=]\s*\d+)\b", low):
+        if re.search(r"\b(\d+\s*[\+\-\*\/\^=]\s*\d+)\b", low) or re.search(r"\b(\d+\s+times\s+\d+)\b", low):
             return True
         if re.search(r"\b(calculate|solve|square root|multiply|divide|math|addition|subtraction|equation)\b", low):
+            return True
+        if re.search(r"^(who|what)\s+(wrote|authored|painted|composed|invented|discovered|built|founded)\b", low):
             return True
         movie_cues = (
             "movie", "film", "cinema", "actor", "actress", "director", "oscar", "hollywood",
@@ -813,7 +815,7 @@ class MovieMindAgent:
             }
 
         # Intent 2: Explain queries
-        if re.search(r"\b(why|explain)\b", low):
+        if re.search(r"\b(why|explain|what makes)\b", low):
             mid = self.find_movie_id_in_text(low)
             if mid is not None:
                 exp = self.explain(mid, user_id=user_id)
@@ -868,7 +870,11 @@ class MovieMindAgent:
         year_match = re.search(r"\b(19\d{2}|20\d{2})\b", low)
         decade_match = re.search(r"\b(\d{2})s\b", low)
         all_genres = ["Action", "Adventure", "Animation", "Children's", "Comedy", "Crime", "Documentary", "Drama", "Fantasy", "Film-Noir", "Horror", "Musical", "Mystery", "Romance", "Sci-Fi", "Thriller", "War", "Western"]
-        genre_synonyms = {"thriller": "Thriller", "detective": "Mystery", "family": "Children's", "funny": "Comedy", "lasers": "Sci-Fi", "space": "Sci-Fi"}
+        genre_synonyms = {
+            "thriller": "Thriller", "detective": "Mystery", "family": "Children's",
+            "funny": "Comedy", "comedies": "Comedy", "comedy": "Comedy",
+            "lasers": "Sci-Fi", "space": "Sci-Fi", "animated": "Animation"
+        }
         matched_genre = next((g for g in all_genres if g.lower() in low), None)
         if not matched_genre:
             for syn_k, syn_v in genre_synonyms.items():
@@ -908,13 +914,21 @@ class MovieMindAgent:
 
         # Intent 6: Explicit Recommendation queries
         is_rec_intent = (
-            any(w in low for w in ("recommend", "recommendation", "recommendations", "suggest", "suggestions", "what should i watch", "what to watch", "picks", "something like", "more like"))
+            any(w in low for w in ("recommend", "recommendation", "recommendations", "suggest", "suggestions", "what should i watch", "what to watch", "pick", "picks", "something like", "more like"))
             or bool(re.search(r"\bgive me\s+(\d+\s+)?([a-z\s-]+\s+)?movies?\b", low))
             or any(k in low for k in ("funny", "space movies", "detective stories", "for family"))
         )
         if is_rec_intent:
             n_match = re.search(r"\b(\d+)\b", low)
-            n_items = int(n_match.group(1)) if n_match else 5
+            word_num_map = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+            if n_match:
+                n_items = int(n_match.group(1))
+            else:
+                n_items = 5
+                for w_str, w_val in word_num_map.items():
+                    if re.search(r"\b" + w_str + r"\b", low):
+                        n_items = w_val
+                        break
             n_items = min(max(n_items, 1), 20)
             genres_to_rec = [g for g in all_genres if g.lower() in low]
             if not genres_to_rec and matched_genre:

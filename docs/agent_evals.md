@@ -1,24 +1,27 @@
-# MovieMind Agent Evaluation Suite
+# MovieMind Agent Evaluation Suite (Held-Out Benchmark)
 
-**LLM Agent Tool-Calling Pass Rate**: 47/47 (**100.0%**)
-**Deterministic Fallback Router Pass Rate**: 47/47 (**100.0%**)
-**Adversarial & Anti-Hallucination Guardrail Pass Rate**: 4/4 (100.0%)
+**Integrity Partition**: Evaluations are reported strictly on the **held-out split** (15 independent test cases with unseen user phrasings across search, recommend, explain, filter, feedback, profile, ambiguous, and off-topic adversarial).
 
-## Comparative Pass Rates by Category
+- **LLM Agent Tool-Calling Pass Rate (Held-Out)**: 15/15 (**100.0%**)
+- **Deterministic Fallback Router Pass Rate (Held-Out)**: 15/15 (**100.0%**)
+- **Adversarial & Guardrail Pass Rate (Held-Out)**: 2/2 (100.0%)
 
-| Category | Cases | LLM Agent Pass Rate | Fallback Router Pass Rate | Primary Tool | Anti-Hallucination Guardrail |
+## Category Differences Between LLM and Fallback Router
+
+*None. Both the LLM Agent and Fallback Router achieved identical 100.0% pass rates across all evaluated held-out categories.*
+
+## Held-Out Pass Rates by Category
+
+| Category | Held-Out Cases | LLM Agent Pass Rate | Fallback Router Pass Rate | Primary Tool | Anti-Hallucination Guardrail |
 | :--- | :---: | :---: | :---: | :--- | :--- |
-| Adversarial | 4 | **100.0%** | **100.0%** | Safety & Rejection Layer | Rejects empty queries, handles prompt injection, and reports catalog misses truthfully. |
-| Ambiguous | 5 | **100.0%** | **100.0%** | `filter_movies` / `recommend` | Interprets thematic/decade/similarity queries without hallucinating catalog metadata. |
-| Explain | 4 | **100.0%** | **100.0%** | `explain` | Cites verified genres and item embeddings cosine similarity; excludes target movie from self-similarity. |
-| Feedback | 4 | **100.0%** | **100.0%** | `record_feedback` | Idempotent SQLite storage; prevents duplicate like/dislike inserts. |
-| Filter | 4 | **100.0%** | **100.0%** | `filter_movies` | Enforces strict release year boundaries and verified MovieLens genres. |
-| Greeting | 2 | **100.0%** | **100.0%** | Direct Dialog Layer (no tools) | Returns immediate welcoming message without invoking tools or recommendations. |
-| Multi step | 5 | **100.0%** | **100.0%** | `record_feedback` / `explain` / `recommend` | Decomposes compound intent into appropriate sequential tool dispatch. |
+| Adversarial | 2 | **100.0%** | **100.0%** | Safety & Rejection Layer | Rejects empty queries, handles prompt injection, and reports catalog misses truthfully. |
+| Ambiguous | 1 | **100.0%** | **100.0%** | `filter_movies` / `recommend` | Interprets thematic/decade/similarity queries without hallucinating catalog metadata. |
+| Explain | 2 | **100.0%** | **100.0%** | `explain` | Cites verified genres and item embeddings cosine similarity; excludes target movie from self-similarity. |
+| Feedback | 2 | **100.0%** | **100.0%** | `record_feedback` | Idempotent SQLite storage; prevents duplicate like/dislike inserts. |
+| Filter | 2 | **100.0%** | **100.0%** | `filter_movies` | Enforces strict release year boundaries and verified MovieLens genres. |
 | Profile | 1 | **100.0%** | **100.0%** | `get_taste_profile` | Grounds summary in recorded user feedback statistics without speculative claims. |
-| Recommend | 4 | **100.0%** | **100.0%** | `recommend` | Constrains recommendations to real MovieLens candidate pool; checks disliked history. |
-| Search | 9 | **100.0%** | **100.0%** | `search_movies` | Matches catalog substring; returns empty on missing title without inventing items. |
-| Typos | 5 | **100.0%** | **100.0%** | `search_movies` / `explain` / `record_feedback` | Normalizes typos (e.g. 'alines' -> 'Aliens', 'jurasic park' -> 'Jurassic Park') before search. |
+| Recommend | 2 | **100.0%** | **100.0%** | `recommend` | Constrains recommendations to real MovieLens candidate pool; checks disliked history. |
+| Search | 3 | **100.0%** | **100.0%** | `search_movies` | Matches catalog substring; returns empty on missing title without inventing items. |
 
 ## Evaluation Details
 

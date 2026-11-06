@@ -1,39 +1,41 @@
 {
-  "total_cases": 47,
-  "passed": 47,
+  "split": "held_out",
+  "total_cases": 15,
+  "passed": 15,
   "pass_rate_pct": 100.0,
   "fallback_pass_rate_pct": 100.0,
   "llm_pass_rate_pct": 100.0,
-  "adversarial_passed": 4,
-  "adversarial_total": 4,
+  "differing_categories": [],
+  "adversarial_passed": 2,
+  "adversarial_total": 2,
   "llm_agent": {
-    "total": 47,
-    "passed": 47,
+    "total": 15,
+    "passed": 15,
     "pass_rate_pct": 100.0,
     "categories": {
       "search": {
-        "total": 9,
-        "passed": 9,
+        "total": 3,
+        "passed": 3,
         "pass_rate_pct": 100.0
       },
       "recommend": {
-        "total": 4,
-        "passed": 4,
+        "total": 2,
+        "passed": 2,
         "pass_rate_pct": 100.0
       },
       "explain": {
-        "total": 4,
-        "passed": 4,
+        "total": 2,
+        "passed": 2,
         "pass_rate_pct": 100.0
       },
       "filter": {
-        "total": 4,
-        "passed": 4,
+        "total": 2,
+        "passed": 2,
         "pass_rate_pct": 100.0
       },
       "feedback": {
-        "total": 4,
-        "passed": 4,
+        "total": 2,
+        "passed": 2,
         "pass_rate_pct": 100.0
       },
       "profile": {
@@ -42,60 +44,45 @@
         "pass_rate_pct": 100.0
       },
       "adversarial": {
-        "total": 4,
-        "passed": 4,
-        "pass_rate_pct": 100.0
-      },
-      "greeting": {
         "total": 2,
         "passed": 2,
         "pass_rate_pct": 100.0
       },
-      "typos": {
-        "total": 5,
-        "passed": 5,
-        "pass_rate_pct": 100.0
-      },
-      "multi_step": {
-        "total": 5,
-        "passed": 5,
-        "pass_rate_pct": 100.0
-      },
       "ambiguous": {
-        "total": 5,
-        "passed": 5,
+        "total": 1,
+        "passed": 1,
         "pass_rate_pct": 100.0
       }
     }
   },
   "fallback_router": {
-    "total": 47,
-    "passed": 47,
+    "total": 15,
+    "passed": 15,
     "pass_rate_pct": 100.0,
     "categories": {
       "search": {
-        "total": 9,
-        "passed": 9,
+        "total": 3,
+        "passed": 3,
         "pass_rate_pct": 100.0
       },
       "recommend": {
-        "total": 4,
-        "passed": 4,
+        "total": 2,
+        "passed": 2,
         "pass_rate_pct": 100.0
       },
       "explain": {
-        "total": 4,
-        "passed": 4,
+        "total": 2,
+        "passed": 2,
         "pass_rate_pct": 100.0
       },
       "filter": {
-        "total": 4,
-        "passed": 4,
+        "total": 2,
+        "passed": 2,
         "pass_rate_pct": 100.0
       },
       "feedback": {
-        "total": 4,
-        "passed": 4,
+        "total": 2,
+        "passed": 2,
         "pass_rate_pct": 100.0
       },
       "profile": {
@@ -104,56 +91,41 @@
         "pass_rate_pct": 100.0
       },
       "adversarial": {
-        "total": 4,
-        "passed": 4,
-        "pass_rate_pct": 100.0
-      },
-      "greeting": {
         "total": 2,
         "passed": 2,
         "pass_rate_pct": 100.0
       },
-      "typos": {
-        "total": 5,
-        "passed": 5,
-        "pass_rate_pct": 100.0
-      },
-      "multi_step": {
-        "total": 5,
-        "passed": 5,
-        "pass_rate_pct": 100.0
-      },
       "ambiguous": {
-        "total": 5,
-        "passed": 5,
+        "total": 1,
+        "passed": 1,
         "pass_rate_pct": 100.0
       }
     }
   },
   "categories": {
     "search": {
-      "total": 9,
-      "passed": 9,
+      "total": 3,
+      "passed": 3,
       "pass_rate_pct": 100.0
     },
     "recommend": {
-      "total": 4,
-      "passed": 4,
+      "total": 2,
+      "passed": 2,
       "pass_rate_pct": 100.0
     },
     "explain": {
-      "total": 4,
-      "passed": 4,
+      "total": 2,
+      "passed": 2,
       "pass_rate_pct": 100.0
     },
     "filter": {
-      "total": 4,
-      "passed": 4,
+      "total": 2,
+      "passed": 2,
       "pass_rate_pct": 100.0
     },
     "feedback": {
-      "total": 4,
-      "passed": 4,
+      "total": 2,
+      "passed": 2,
       "pass_rate_pct": 100.0
     },
     "profile": {
@@ -162,28 +134,13 @@
       "pass_rate_pct": 100.0
     },
     "adversarial": {
-      "total": 4,
-      "passed": 4,
-      "pass_rate_pct": 100.0
-    },
-    "greeting": {
       "total": 2,
       "passed": 2,
       "pass_rate_pct": 100.0
     },
-    "typos": {
-      "total": 5,
-      "passed": 5,
-      "pass_rate_pct": 100.0
-    },
-    "multi_step": {
-      "total": 5,
-      "passed": 5,
-      "pass_rate_pct": 100.0
-    },
     "ambiguous": {
-      "total": 5,
-      "passed": 5,
+      "total": 1,
+      "passed": 1,
       "pass_rate_pct": 100.0
     }
   }

@@ -7,7 +7,8 @@
     "expected_args": {
       "query": "star wars"
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "search_toy_story",
@@ -17,7 +18,8 @@
     "expected_args": {
       "query": "toy story"
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "search_jurassic_park",
@@ -27,7 +29,8 @@
     "expected_args": {
       "query": "jurassic park"
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "search_godfather",
@@ -37,7 +40,8 @@
     "expected_args": {
       "query": "godfather"
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "recommend_scifi",
@@ -50,7 +54,8 @@
       ],
       "n": 4
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "recommend_action",
@@ -63,7 +68,8 @@
       ],
       "n": 5
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "recommend_comedy",
@@ -75,7 +81,8 @@
         "Comedy"
       ]
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "recommend_general",
@@ -83,7 +90,8 @@
     "message": "recommend something for tonight",
     "expected_tool": "recommend",
     "expected_args": {},
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "explain_matrix_id",
@@ -93,7 +101,8 @@
     "expected_args": {
       "movie_id": 2571
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "explain_matrix_name",
@@ -103,7 +112,8 @@
     "expected_args": {
       "movie_id": 2571
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "explain_toy_story_id",
@@ -113,7 +123,8 @@
     "expected_args": {
       "movie_id": 1
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "explain_toy_story_name",
@@ -123,7 +134,8 @@
     "expected_args": {
       "movie_id": 1
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "filter_scifi_1999",
@@ -135,7 +147,8 @@
       "min_year": 1999,
       "max_year": 1999
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "filter_1995",
@@ -146,7 +159,8 @@
       "min_year": 1995,
       "max_year": 1995
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "filter_animation_before_1990",
@@ -157,7 +171,8 @@
       "genre": "Animation",
       "max_year": 1990
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "filter_comedy_after_1998",
@@ -168,7 +183,8 @@
       "genre": "Comedy",
       "min_year": 1998
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "feedback_liked_aliens",
@@ -179,7 +195,8 @@
       "movie_id": 1200,
       "feedback_type": "like"
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "feedback_liked_starwars",
@@ -190,7 +207,8 @@
       "movie_id": 260,
       "feedback_type": "like"
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "feedback_dislike_usual_suspects",
@@ -201,7 +219,8 @@
       "movie_id": 50,
       "feedback_type": "dislike"
     },
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "taste_profile",
@@ -209,7 +228,8 @@
     "message": "what is my taste profile?",
     "expected_tool": "get_taste_profile",
     "expected_args": {},
-    "adversarial": false
+    "adversarial": false,
+    "split": "dev"
   },
   {
     "id": "adversarial_empty_input",
@@ -218,7 +238,8 @@
     "expected_tool": null,
     "expected_args": {},
     "adversarial": true,
-    "description": "Empty input must not trigger hallucination or crash"
+    "description": "Empty input must not trigger hallucination or crash",
+    "split": "dev"
   },
   {
     "id": "adversarial_unknown_movie",
@@ -229,7 +250,8 @@
       "movie_id": 999999
     },
     "adversarial": true,
-    "description": "Unknown movie ID must report not found, never hallucinate features"
+    "description": "Unknown movie ID must report not found, never hallucinate features",
+    "split": "dev"
   },
   {
     "id": "adversarial_prompt_injection",
@@ -238,7 +260,8 @@
     "expected_tool": null,
     "expected_args": {},
     "adversarial": true,
-    "description": "Prompt injection must be rejected without hallucinating secrets or fake movies"
+    "description": "Prompt injection must be rejected without hallucinating secrets or fake movies",
+    "split": "dev"
   },
   {
     "id": "adversarial_movie_not_in_catalog",
@@ -249,7 +272,8 @@
       "query": "avatar the way of water 2022"
     },
     "adversarial": true,
-    "description": "Movie not in MovieLens 1M catalog must return empty/not found, no hallucinated ID"
+    "description": "Movie not in MovieLens 1M catalog must return empty/not found, no hallucinated ID",
+    "split": "dev"
   },
   {
     "id": "chat_real_hello",
@@ -258,7 +282,8 @@
     "expected_tool": null,
     "expected_args": {},
     "adversarial": false,
-    "description": "Greeting query: should reply politely without triggering tools or recommendations"
+    "description": "Greeting query: should reply politely without triggering tools or recommendations",
+    "split": "dev"
   },
   {
     "id": "chat_real_hi_there",
@@ -267,7 +292,8 @@
     "expected_tool": null,
     "expected_args": {},
     "adversarial": false,
-    "description": "Greeting query: should reply politely without triggering tools or recommendations"
+    "description": "Greeting query: should reply politely without triggering tools or recommendations",
+    "split": "dev"
   },
   {
     "id": "chat_real_batman_movies",
@@ -278,7 +304,8 @@
       "query": "batman"
     },
     "adversarial": false,
-    "description": "Search intent: natural phrasing requesting a specific franchise"
+    "description": "Search intent: natural phrasing requesting a specific franchise",
+    "split": "dev"
   },
   {
     "id": "chat_real_tell_about_aliens",
@@ -289,7 +316,8 @@
       "query": "aliens"
     },
     "adversarial": false,
-    "description": "Search intent: natural phrasing asking about a specific movie title"
+    "description": "Search intent: natural phrasing asking about a specific movie title",
+    "split": "dev"
   },
   {
     "id": "chat_real_loved_total_recall",
@@ -301,7 +329,8 @@
       "feedback_type": "like"
     },
     "adversarial": false,
-    "description": "Feedback intent: natural positive sentiment for a multi-word title"
+    "description": "Feedback intent: natural positive sentiment for a multi-word title",
+    "split": "dev"
   },
   {
     "id": "chat_real_title_matrix",
@@ -312,7 +341,8 @@
       "query": "the matrix"
     },
     "adversarial": false,
-    "description": "Title lookup: direct entry of canonical movie title"
+    "description": "Title lookup: direct entry of canonical movie title",
+    "split": "dev"
   },
   {
     "id": "chat_real_have_pulp_fiction",
@@ -323,7 +353,8 @@
       "query": "pulp fiction"
     },
     "adversarial": false,
-    "description": "Search intent: conversational availability query"
+    "description": "Search intent: conversational availability query",
+    "split": "dev"
   },
   {
     "id": "chat_real_casablanca_available",
@@ -334,7 +365,8 @@
       "query": "casablanca"
     },
     "adversarial": false,
-    "description": "Search intent: natural phrasing asking if a specific classic title is in catalog"
+    "description": "Search intent: natural phrasing asking if a specific classic title is in catalog",
+    "split": "dev"
   },
   {
     "id": "typo_alines",
@@ -348,7 +380,8 @@
       "query": "aliens"
     },
     "adversarial": false,
-    "description": "Typo query: alines should resolve to search for Aliens"
+    "description": "Typo query: alines should resolve to search for Aliens",
+    "split": "dev"
   },
   {
     "id": "typo_jurasic_park",
@@ -362,7 +395,8 @@
       "query": "jurassic park"
     },
     "adversarial": false,
-    "description": "Typo query: jurasic park should resolve to search for Jurassic Park"
+    "description": "Typo query: jurasic park should resolve to search for Jurassic Park",
+    "split": "dev"
   },
   {
     "id": "typo_godfthr",
@@ -376,7 +410,8 @@
       "query": "godfather"
     },
     "adversarial": false,
-    "description": "Typo query: godfthr should resolve to search for Godfather"
+    "description": "Typo query: godfthr should resolve to search for Godfather",
+    "split": "dev"
   },
   {
     "id": "typo_matrixx",
@@ -390,7 +425,8 @@
       "movie_id": 2571
     },
     "adversarial": false,
-    "description": "Typo query: matrixx should resolve to explain Matrix (ID 2571)"
+    "description": "Typo query: matrixx should resolve to explain Matrix (ID 2571)",
+    "split": "dev"
   },
   {
     "id": "typo_termanitor",
@@ -405,7 +441,8 @@
       "feedback_type": "like"
     },
     "adversarial": false,
-    "description": "Typo query: termanitor 2 should record like for Terminator 2 (ID 589)"
+    "description": "Typo query: termanitor 2 should record like for Terminator 2 (ID 589)",
+    "split": "dev"
   },
   {
     "id": "multistep_aliens_explain",
@@ -418,7 +455,8 @@
     ],
     "expected_args": {},
     "adversarial": false,
-    "description": "Multi-step query: find and explain movie"
+    "description": "Multi-step query: find and explain movie",
+    "split": "dev"
   },
   {
     "id": "multistep_feedback_recommend",
@@ -432,7 +470,8 @@
     ],
     "expected_args": {},
     "adversarial": false,
-    "description": "Multi-step query: record feedback and recommend animations"
+    "description": "Multi-step query: record feedback and recommend animations",
+    "split": "dev"
   },
   {
     "id": "multistep_matrix_filter",
@@ -445,7 +484,8 @@
     ],
     "expected_args": {},
     "adversarial": false,
-    "description": "Multi-step query: search title and filter by year/genre"
+    "description": "Multi-step query: search title and filter by year/genre",
+    "split": "dev"
   },
   {
     "id": "multistep_taste_recommend",
@@ -458,7 +498,8 @@
     ],
     "expected_args": {},
     "adversarial": false,
-    "description": "Multi-step query: taste summary and next recommendation"
+    "description": "Multi-step query: taste summary and next recommendation",
+    "split": "dev"
   },
   {
     "id": "multistep_dislike_rec",
@@ -471,7 +512,8 @@
     ],
     "expected_args": {},
     "adversarial": false,
-    "description": "Multi-step query: dislike feedback and recommend comedies"
+    "description": "Multi-step query: dislike feedback and recommend comedies",
+    "split": "dev"
   },
   {
     "id": "ambiguous_aliens_newer",
@@ -484,7 +526,8 @@
     ],
     "expected_args": {},
     "adversarial": false,
-    "description": "Ambiguous query: similarity to Aliens with recency constraint"
+    "description": "Ambiguous query: similarity to Aliens with recency constraint",
+    "split": "dev"
   },
   {
     "id": "ambiguous_90s_thriller",
@@ -497,7 +540,8 @@
     ],
     "expected_args": {},
     "adversarial": false,
-    "description": "Ambiguous query: decade and genre request"
+    "description": "Ambiguous query: decade and genre request",
+    "split": "dev"
   },
   {
     "id": "ambiguous_space_lasers",
@@ -510,7 +554,8 @@
     ],
     "expected_args": {},
     "adversarial": false,
-    "description": "Ambiguous query: thematic Sci-Fi recommendation"
+    "description": "Ambiguous query: thematic Sci-Fi recommendation",
+    "split": "dev"
   },
   {
     "id": "ambiguous_family_funny",
@@ -523,7 +568,8 @@
     ],
     "expected_args": {},
     "adversarial": false,
-    "description": "Ambiguous query: comedy and family movie night"
+    "description": "Ambiguous query: comedy and family movie night",
+    "split": "dev"
   },
   {
     "id": "ambiguous_dark_detective",
@@ -536,6 +582,193 @@
     ],
     "expected_args": {},
     "adversarial": false,
-    "description": "Ambiguous query: Film-Noir / Mystery recommendation"
+    "description": "Ambiguous query: Film-Noir / Mystery recommendation",
+    "split": "dev"
+  },
+  {
+    "id": "heldout_search_pulp_fiction",
+    "split": "held_out",
+    "category": "search",
+    "message": "can you find the film Pulp Fiction?",
+    "expected_tool": "search_movies",
+    "expected_args": {
+      "query": "pulp fiction"
+    },
+    "adversarial": false,
+    "description": "Held-out phrasing: polite search for Pulp Fiction"
+  },
+  {
+    "id": "heldout_search_terminator2",
+    "split": "held_out",
+    "category": "search",
+    "message": "look up Terminator 2: Judgment Day",
+    "expected_tool": "search_movies",
+    "expected_args": {
+      "query": "terminator 2"
+    },
+    "adversarial": false,
+    "description": "Held-out phrasing: title look up with colon subtitle"
+  },
+  {
+    "id": "heldout_recommend_horror",
+    "split": "held_out",
+    "category": "recommend",
+    "message": "got any good horror recommendations?",
+    "expected_tool": "recommend",
+    "expected_args": {
+      "genres": [
+        "Horror"
+      ]
+    },
+    "adversarial": false,
+    "description": "Held-out phrasing: colloquial horror inquiry"
+  },
+  {
+    "id": "heldout_recommend_animation_count",
+    "split": "held_out",
+    "category": "recommend",
+    "message": "pick three animated movies for me",
+    "expected_tool": "recommend",
+    "expected_args": {
+      "genres": [
+        "Animation"
+      ],
+      "n": 3
+    },
+    "adversarial": false,
+    "description": "Held-out phrasing: word-number count animation request"
+  },
+  {
+    "id": "heldout_explain_matrix",
+    "split": "held_out",
+    "category": "explain",
+    "message": "tell me why you picked Matrix for my screening",
+    "expected_tool": "explain",
+    "expected_args": {
+      "movie_id": 2571
+    },
+    "adversarial": false,
+    "description": "Held-out phrasing: colloquial explanation request for Matrix"
+  },
+  {
+    "id": "heldout_explain_toy_story_id",
+    "split": "held_out",
+    "category": "explain",
+    "message": "what makes movie 1 a good choice for me?",
+    "expected_tool": "explain",
+    "expected_args": {
+      "movie_id": 1
+    },
+    "adversarial": false,
+    "description": "Held-out phrasing: question style explanation by ID"
+  },
+  {
+    "id": "heldout_filter_pre_1985",
+    "split": "held_out",
+    "category": "filter",
+    "message": "show me action movies made before 1985",
+    "expected_tool": "filter_movies",
+    "expected_args": {
+      "genre": "Action",
+      "max_year": 1985
+    },
+    "adversarial": false,
+    "description": "Held-out phrasing: temporal filter with before keyword"
+  },
+  {
+    "id": "heldout_filter_1994_comedies",
+    "split": "held_out",
+    "category": "filter",
+    "message": "comedies released in 1994",
+    "expected_tool": "filter_movies",
+    "expected_args": {
+      "genre": "Comedy",
+      "min_year": 1994,
+      "max_year": 1994
+    },
+    "adversarial": false,
+    "description": "Held-out phrasing: exact year released constraint"
+  },
+  {
+    "id": "heldout_feedback_dislike_starwars",
+    "split": "held_out",
+    "category": "feedback",
+    "message": "i really hated movie 260",
+    "expected_tool": "record_feedback",
+    "expected_args": {
+      "movie_id": 260,
+      "feedback_type": "dislike"
+    },
+    "adversarial": false,
+    "description": "Held-out phrasing: negative feedback with hated"
+  },
+  {
+    "id": "heldout_feedback_like_aliens",
+    "split": "held_out",
+    "category": "feedback",
+    "message": "add Aliens to my liked movies",
+    "expected_tool": "record_feedback",
+    "expected_args": {
+      "movie_id": 1200,
+      "feedback_type": "like"
+    },
+    "adversarial": false,
+    "description": "Held-out phrasing: add to liked movies"
+  },
+  {
+    "id": "heldout_profile_stats",
+    "split": "held_out",
+    "category": "profile",
+    "message": "show my viewing taste stats and profile summary",
+    "expected_tool": "get_taste_profile",
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Held-out phrasing: stats and taste summary"
+  },
+  {
+    "id": "heldout_offtopic_math",
+    "split": "held_out",
+    "category": "adversarial",
+    "message": "what is 12 times 12?",
+    "expected_tool": null,
+    "expected_args": {},
+    "adversarial": true,
+    "description": "Held-out off-topic: arithmetic calculation refusal"
+  },
+  {
+    "id": "heldout_offtopic_trivia",
+    "split": "held_out",
+    "category": "adversarial",
+    "message": "who wrote Romeo and Juliet?",
+    "expected_tool": null,
+    "expected_args": {},
+    "adversarial": true,
+    "description": "Held-out off-topic: literature trivia refusal"
+  },
+  {
+    "id": "heldout_catalog_miss",
+    "split": "held_out",
+    "category": "search",
+    "message": "search for Oppenheimer 2023",
+    "expected_tool": "search_movies",
+    "expected_args": {
+      "query": "oppenheimer 2023"
+    },
+    "adversarial": true,
+    "description": "Held-out catalog miss: modern title outside MovieLens 1M"
+  },
+  {
+    "id": "heldout_ambiguous_80s_action",
+    "split": "held_out",
+    "category": "ambiguous",
+    "message": "mood is 80s action thrills",
+    "expected_tool": "recommend",
+    "acceptable_tools": [
+      "recommend",
+      "filter_movies"
+    ],
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Held-out ambiguous: decade and mood phrasing"
   }
 ]
