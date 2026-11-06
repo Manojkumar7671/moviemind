@@ -1,15 +1,19 @@
 """Content-based recommender over the World Cinema catalog.
 
 Features:
-- TF-IDF over genres, languages, and approximate origin region
+- TF-IDF over genres, original languages, and origin countries (sourced from Wikidata CC0)
 - Bayesian rating/votes prior
 - Cosine similarity with user taste profile vector
 - Likes dynamically shift user profile vector
 - Maximal Marginal Relevance (MMR) re-ranking for intra-list diversity
 """
 
+from __future__ import annotations
+
+from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
+
 import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -17,6 +21,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from src.diversity import mmr_rerank
 
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "artifacts" / "global_catalog.parquet"
+
 
 class GlobalContentRecommender:
     def __init__(self, catalog_path: Path = CATALOG_PATH):
@@ -27,13 +32,18 @@ class GlobalContentRecommender:
         self.id_to_idx = {mid: idx for idx, mid in enumerate(self.df["id"])}
         self.idx_to_id = {idx: mid for idx, mid in enumerate(self.df["id"])}
 
-        # 1. Build text representations for TF-IDF
+        # 1. Build text representations for TF-IDF from genres, original_languages, and origin_countries
         feature_texts = []
         for _, r in self.df.iterrows():
             genres = " ".join([f"g_{g.strip().lower()}" for g in r["genres"].split("|") if g.strip()])
-            langs = " ".join([f"l_{l.strip().lower()}" for l in r["languages"].split(",") if l.strip()])
-            reg = f"r_{r['approx_origin_region'].strip().lower()}" if r["approx_origin_region"] else "r_unknown"
-            feature_texts.append(f"{genres} {langs} {reg}")
+            langs = " ".join(
+                [f"l_{str(l).strip().lower()}" for l in r["original_languages"] if str(l).strip() and l != "Unknown"]
+            )
+            countries = " ".join(
+                [f"c_{str(c).strip().lower()}" for c in r["origin_countries"] if str(c).strip() and c != "Unknown"]
+            )
+            tokens = f"{genres} {langs} {countries}".strip()
+            feature_texts.append(tokens if tokens else "empty")
 
         self.vectorizer = TfidfVectorizer(token_pattern=r"(?u)\b\w+\b")
         self.tfidf_matrix = self.vectorizer.fit_transform(feature_texts)
@@ -46,27 +56,50 @@ class GlobalContentRecommender:
         bayes_rating = (v / (v + m)) * R + (m / (v + m)) * C
         self.prior = np.clip((bayes_rating - 4.0) / 5.5, 0.0, 1.0).astype(np.float32)
 
-        # 3. Dynamic metadata bounds
+        # 3. Dynamic metadata bounds and counts derived from data
         self.min_year = int(self.df["year"].min())
         self.max_year = int(self.df["year"].max())
 
-        self.available_regions = sorted(
-            [r for r in self.df["approx_origin_region"].unique() if r and r != "Unknown"]
-        )
+        region_counts = Counter()
+        region_names: Dict[str, str] = {}
+        for _, row in self.df.iterrows():
+            cs = row["origin_countries"]
+            clbls = row["country_labels"]
+            for c, lbl in zip(cs, clbls):
+                if c and c != "Unknown":
+                    code = str(c).upper()
+                    region_counts[code] += 1
+                    if lbl and lbl != "Unknown":
+                        region_names[code] = str(lbl)
 
-        all_langs = set()
-        for lstr in self.df["languages"]:
-            for l in lstr.split(","):
-                if l.strip():
-                    all_langs.add(l.strip())
-        self.available_languages = sorted(all_langs)
+        self.available_regions = [
+            {"code": code, "name": region_names.get(code, code), "count": count}
+            for code, count in region_counts.most_common()
+        ]
 
-        all_genres = set()
-        for gstr in self.df["genres"]:
-            for g in gstr.split("|"):
+        lang_counts = Counter()
+        lang_names: Dict[str, str] = {}
+        for _, row in self.df.iterrows():
+            ls = row["original_languages"]
+            llbls = row["language_labels"]
+            for l, lbl in zip(ls, llbls):
+                if l and l != "Unknown":
+                    code = str(l).lower()
+                    lang_counts[code] += 1
+                    if lbl and lbl != "Unknown":
+                        lang_names[code] = str(lbl)
+
+        self.available_languages = [
+            {"code": code, "name": lang_names.get(code, code), "count": count}
+            for code, count in lang_counts.most_common()
+        ]
+
+        genre_counts = Counter()
+        for _, row in self.df.iterrows():
+            for g in row["genres"].split("|"):
                 if g.strip():
-                    all_genres.add(g.strip())
-        self.available_genres = sorted(all_genres)
+                    genre_counts[g.strip()] += 1
+        self.available_genres = [g for g, _ in genre_counts.most_common()]
 
     def get_user_profile_vector(
         self,
@@ -90,7 +123,7 @@ class GlobalContentRecommender:
         if preferred_genres:
             query_tokens.extend([f"g_{g.strip().lower()}" for g in preferred_genres if g.strip()])
         if preferred_region:
-            query_tokens.append(f"r_{preferred_region.strip().lower()}")
+            query_tokens.append(f"c_{preferred_region.strip().lower()}")
         if preferred_language:
             query_tokens.append(f"l_{preferred_language.strip().lower()}")
 
@@ -119,7 +152,7 @@ class GlobalContentRecommender:
         year_max: Optional[int] = None,
         n: int = 12,
         lmbda: float = 0.7,
-    ) -> List[Dict]:
+    ) -> List[Dict[str, Any]]:
         """Return diverse content-based recommendations with metadata filters."""
         # 1. Candidate filtering mask
         mask = np.ones(self.n_items, dtype=bool)
@@ -128,19 +161,27 @@ class GlobalContentRecommender:
             mask &= (self.df["year"] >= year_min)
         if year_max is not None:
             mask &= (self.df["year"] <= year_max)
+
+        # Region filter: requested country in origin_countries (case-insensitive); exclude Unknown
         if region:
             reg_clean = region.strip().upper()
-            mask &= (self.df["approx_origin_region"].str.upper() == reg_clean)
+            mask &= self.df["origin_countries"].apply(
+                lambda cs: bool(cs) and any(str(c).upper() == reg_clean for c in cs if c != "Unknown")
+            )
+
+        # Language filter: requested language in original_languages (case-insensitive); exclude Unknown
         if language:
             lang_clean = language.strip().lower()
-            mask &= self.df["languages"].apply(
-                lambda s: lang_clean in [x.lower() for x in s.split(",") if x]
+            mask &= self.df["original_languages"].apply(
+                lambda ls: bool(ls) and any(str(l).lower() == lang_clean for l in ls if l != "Unknown")
             )
+
         if genres:
             g_set = set(g.strip().lower() for g in genres if g.strip())
             mask &= self.df["genres"].apply(
                 lambda s: bool(set(x.lower() for x in s.split("|") if x) & g_set)
             )
+
         if liked_ids:
             liked_set = set(liked_ids)
             mask &= ~self.df["id"].isin(liked_set)
@@ -194,7 +235,8 @@ class GlobalContentRecommender:
             raw_s = score_lookup.get(mid, 0.5)
             pct = int(np.clip(70 + 29 * (raw_s - min_s) / (max_s - min_s + 1e-8), 70, 99))
             genre_list = [g.strip() for g in row["genres"].split("|") if g.strip()]
-            lang_list = [l.strip() for l in row["languages"].split(",") if l.strip()]
+            origin_str = ", ".join(row["origin_countries"]) if len(row["origin_countries"]) > 0 else "unknown"
+            country_name_str = ", ".join(row["country_labels"]) if len(row["country_labels"]) > 0 else origin_str
 
             results.append({
                 "movie_id": str(row["id"]),
@@ -203,10 +245,16 @@ class GlobalContentRecommender:
                 "genres": genre_list,
                 "rating": float(row["rating"]),
                 "votes": int(row["votes"]),
-                "approx_origin_region": str(row["approx_origin_region"]),
-                "languages": lang_list,
+                "origin_countries": list(row["origin_countries"]),
+                "original_languages": list(row["original_languages"]),
+                "origin_primary": str(row["origin_primary"]),
+                "language_primary": str(row["language_primary"]),
+                "country_labels": list(row["country_labels"]),
+                "language_labels": list(row["language_labels"]),
+                "origin": origin_str,
+                "country_name": country_name_str,
                 "match_pct": pct,
-                "explanation": f"Rating {row['rating']}/10 ({row['votes']:,} votes) • {row['approx_origin_region']} • {', '.join(genre_list[:2])}",
+                "explanation": f"Rating {row['rating']}/10 ({row['votes']:,} votes) • Origin: {origin_str} • {', '.join(genre_list[:2])}",
                 "trace": [
                     {"tool": "content_tfidf", "args": {"mid": mid}, "latency_ms": 1.2},
                     {"tool": "mmr_diversity", "args": {"lambda": lmbda}, "latency_ms": 0.8},

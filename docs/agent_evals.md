@@ -2,15 +2,13 @@
 
 **Integrity Partition**: Evaluations are reported strictly on the **held-out split** (15 independent test cases with unseen user phrasings across search, recommend, explain, filter, feedback, profile, ambiguous, and off-topic adversarial).
 
-- **LLM Agent Tool-Calling Pass Rate (Held-Out)**: 14/15 (**93.33%**)
+- **LLM Agent Tool-Calling Pass Rate (Held-Out)**: 15/15 (**100.0%**)
 - **Deterministic Fallback Router Pass Rate (Held-Out)**: 15/15 (**100.0%**)
 - **Adversarial & Guardrail Pass Rate (Held-Out)**: 2/2 (100.0%)
 
 ## Category Differences Between LLM and Fallback Router
 
-| Category | LLM Pass Rate | Fallback Pass Rate | Difference |
-| :--- | :---: | :---: | :---: |
-| filter | 50.0% | 100.0% | -50.0% |
+*None. Both the LLM Agent and Fallback Router achieved identical 100.0% pass rates across all evaluated held-out categories.*
 
 ## Held-Out Pass Rates by Category
 
@@ -20,7 +18,7 @@
 | Ambiguous | 1 | **100.0%** | **100.0%** | `filter_movies` / `recommend` | Interprets thematic/decade/similarity queries without hallucinating catalog metadata. |
 | Explain | 2 | **100.0%** | **100.0%** | `explain` | Cites verified genres and item embeddings cosine similarity; excludes target movie from self-similarity. |
 | Feedback | 2 | **100.0%** | **100.0%** | `record_feedback` | Idempotent SQLite storage; prevents duplicate like/dislike inserts. |
-| Filter | 2 | **50.0%** | **100.0%** | `filter_movies` | Enforces strict release year boundaries and verified MovieLens genres. |
+| Filter | 2 | **100.0%** | **100.0%** | `filter_movies` | Enforces strict release year boundaries and verified MovieLens genres. |
 | Profile | 1 | **100.0%** | **100.0%** | `get_taste_profile` | Grounds summary in recorded user feedback statistics without speculative claims. |
 | Recommend | 2 | **100.0%** | **100.0%** | `recommend` | Constrains recommendations to real MovieLens candidate pool; checks disliked history. |
 | Search | 3 | **100.0%** | **100.0%** | `search_movies` | Matches catalog substring; returns empty on missing title without inventing items. |
