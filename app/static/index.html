@@ -246,6 +246,76 @@
           </table>
         </div>
 
+        <!-- World Cinema Leave-One-Out Evaluation -->
+        <div class="table-card" style="border-left: 4px solid var(--retro);">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+            <div>
+              <span class="live-indicator" style="background:rgba(79,181,165,0.15); color:var(--retro); border:1px solid rgba(79,181,165,0.4); padding:3px 8px; border-radius:4px; font-weight:700; font-size:11px;">CONTENT EVALUATION ONLY</span>
+              <h2 class="section-title" style="margin-top:6px;">World Cinema (IMDb) — Leave-One-Out Content Similarity</h2>
+              <p class="section-subtitle">Evaluated on N=500 probe movies across diverse regions and genres. Target is held-out most similar neighbor in content space.</p>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:11px; color:var(--muted); text-transform:uppercase; font-weight:700;">Hit Rate@10 (MMR λ=0.7)</div>
+              <div style="font-size:32px; font-weight:800; color:var(--retro);" id="worldHit10">91.2%</div>
+            </div>
+          </div>
+
+          <div style="margin: 12px 0; padding: 10px 14px; background: rgba(79,181,165,0.08); border: 1px solid rgba(79,181,165,0.25); border-radius: var(--radius-sm); font-size: 12px; color: var(--text);">
+            <strong>Honest Metric Notice</strong>: Evaluated strictly via content-based leave-one-out item similarity. Because the IMDb non-commercial dataset does not contain individual user rating logs, <em>no collaborative filtering performance (collaborative Recall/NDCG) is claimed</em> on this catalog.
+          </div>
+
+          <div style="overflow-x:auto;">
+            <table class="eval-table">
+              <thead>
+                <tr>
+                  <th>Pipeline Configuration</th>
+                  <th>Hit Rate@10</th>
+                  <th>Hit Rate@20</th>
+                  <th>Target Cosine Sim@10</th>
+                  <th>Intra-List Diversity (ILD@10)</th>
+                  <th>Unique Catalog Coverage</th>
+                </tr>
+              </thead>
+              <tbody id="worldEvalTbody">
+                <tr>
+                  <td><strong>Pure Content (TF-IDF + Prior, λ=1.0)</strong></td>
+                  <td>0.9080 (90.8%)</td>
+                  <td>—</td>
+                  <td>0.8374</td>
+                  <td>0.2033</td>
+                  <td>4,262</td>
+                </tr>
+                <tr style="color:var(--retro); font-weight:600;">
+                  <td><strong>Content + MMR Diversity (λ=0.7)</strong></td>
+                  <td>0.9120 (91.2%)</td>
+                  <td>0.9580 (95.8%)</td>
+                  <td>0.8335</td>
+                  <td>0.2159 (+6.16%)</td>
+                  <td>7,627 (+78.9%)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="ab-metrics-row" style="margin-top:16px;">
+            <div class="metric-box">
+              <div style="font-size:12px; color:var(--muted);">Genre Overlap Consistency@10</div>
+              <div class="metric-val-big" style="color:var(--text);" id="worldGenreOverlap">96.0%</div>
+              <div style="font-size:11px; color:var(--muted);">Share of recs matching probe genres</div>
+            </div>
+            <div class="metric-box">
+              <div style="font-size:12px; color:var(--muted);">Origin Region Consistency@10</div>
+              <div class="metric-val-big" style="color:var(--retro);" id="worldRegionConsistency">92.4%</div>
+              <div style="font-size:11px; color:var(--muted);">Share of recs preserving origin region</div>
+            </div>
+            <div class="metric-box">
+              <div style="font-size:12px; color:var(--muted);">Intra-List Diversity Lift</div>
+              <div class="metric-val-big" style="color:var(--primary);">+6.16%</div>
+              <div style="font-size:11px; color:var(--muted);">MMR (λ=0.7) vs pure TF-IDF score</div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </section>
 

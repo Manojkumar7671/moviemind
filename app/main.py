@@ -224,10 +224,20 @@ def get_eval():
         except Exception:
             pass
 
+    global_eval_file = ARTIFACTS_DIR / "global_eval_results.json"
+    world_cinema_eval = None
+    if global_eval_file.exists():
+        try:
+            with open(global_eval_file) as f:
+                world_cinema_eval = json.load(f)
+        except Exception:
+            pass
+
     return {
         "ablation_table": ablation_table,
         "ab_test": ab_result,
         "agent_evals": agent_eval_summary,
+        "world_cinema_eval": world_cinema_eval,
     }
 
 @app.post("/api/chat")

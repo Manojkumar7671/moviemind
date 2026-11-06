@@ -132,3 +132,41 @@ def test_chat_filter_movies_with_region_and_language():
     assert chat_res["args"]["region"] == "JP"
     assert chat_res["args"]["year"] == 1956
     assert any("The Burmese Harp" in r["title"] or "Burmese Harp" in r["title"] for r in chat_res["result"])
+
+def test_global_content_eval_metrics():
+    import json
+    eval_file = Path(__file__).resolve().parent.parent / "artifacts" / "global_eval_results.json"
+    docs_file = Path(__file__).resolve().parent.parent / "docs" / "global_eval.md"
+
+    if not eval_file.exists():
+        from src.global_eval import run_global_evaluation
+        run_global_evaluation(n_samples=50)
+
+    assert eval_file.exists(), "Missing artifacts/global_eval_results.json"
+    assert docs_file.exists(), "Missing docs/global_eval.md"
+
+    with open(eval_file) as f:
+        data = json.load(f)
+
+    # Verify honesty disclaimer is present
+    assert "collaborative" in data["honesty_disclaimer"].lower()
+    assert "no collaborative filtering performance" in data["honesty_disclaimer"].lower()
+
+    metrics = data["metrics"]
+    pure = metrics["pure_content_top10"]
+    mmr = metrics["content_plus_mmr_top10"]
+
+    assert pure["hit_rate_10"] >= 0.80, f"Expected Hit@10 >= 80%, got {pure['hit_rate_10']}"
+    assert mmr["hit_rate_20"] >= mmr["hit_rate_10"], "Hit@20 must be >= Hit@10"
+    assert mmr["ild_10"] >= pure["ild_10"], "MMR must provide >= Intra-List Diversity than pure score"
+
+    # Verify /api/eval includes world cinema eval
+    from fastapi.testclient import TestClient
+    from app.main import app
+    client = TestClient(app)
+    res = client.get("/api/eval")
+    assert res.status_code == 200
+    eval_json = res.json()
+    assert "world_cinema_eval" in eval_json
+    assert eval_json["world_cinema_eval"] is not None
+    assert "honesty_disclaimer" in eval_json["world_cinema_eval"]

@@ -152,7 +152,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadEvaluationData();
 
   const initialTab = (window.location.hash || '').replace('#', '');
-  if (['discover', 'tastemap', 'eval'].includes(initialTab)) {
+  if (['discover', 'world', 'tastemap', 'eval'].includes(initialTab)) {
     switchTab(initialTab);
   }
   if (window.location.search.includes('noanim=1')) {
@@ -883,6 +883,23 @@ async function loadEvaluationData() {
         <tr><td>Ambiguous & Thematic Constraints</td><td>5</td><td><strong style="color:#10B981;">100%</strong></td><td><strong style="color:var(--primary);">100%</strong></td><td>filter/recommend</td></tr>
         <tr><td>Adversarial Anti-Hallucination</td><td>4</td><td><strong style="color:#10B981;">100%</strong></td><td><strong style="color:var(--primary);">100%</strong></td><td>catalog bounds guard</td></tr>
       `;
+    }
+
+    // World Cinema Content Evaluation
+    if (data.world_cinema_eval && data.world_cinema_eval.metrics) {
+      const m = data.world_cinema_eval.metrics;
+      const elH10 = document.getElementById('worldHit10');
+      if (elH10 && m.content_plus_mmr_top10) {
+        elH10.innerText = `${(m.content_plus_mmr_top10.hit_rate_10 * 100).toFixed(1)}%`;
+      }
+      const elGen = document.getElementById('worldGenreOverlap');
+      if (elGen && m.alignment) {
+        elGen.innerText = `${(m.alignment.genre_overlap_consistency_10 * 100).toFixed(1)}%`;
+      }
+      const elReg = document.getElementById('worldRegionConsistency');
+      if (elReg && m.alignment) {
+        elReg.innerText = `${(m.alignment.origin_region_consistency_10 * 100).toFixed(1)}%`;
+      }
     }
   } catch (err) {
     console.error('Failed to load evaluation data:', err);
