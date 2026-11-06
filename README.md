@@ -20,6 +20,24 @@
 
 ---
 
+## 🌟 Recommender Engine Modes
+
+MovieMind provides two complementary recommendation modes tailored for different data and catalog contexts:
+
+1. **Private Screening Room (Collaborative Filtering)**:
+   - **Catalog**: MovieLens 1M (3,952 films, $N=6,040$ users, 1,000,209 ratings).
+   - **Architecture**: Two-Tower PyTorch embeddings + FAISS CPU vector index (Top-200 candidates) $\to$ Wide & Deep cross-feature neural ranker (Top-60) $\to$ Maximal Marginal Relevance (MMR $\lambda=0.7$) intra-list diversification.
+   - **Features**: Personalized neural taste representations, demographic priors, and real-time 2D taste map projection via PCA.
+   - **Evaluation**: Leave-one-out time-based offline test set ($N=6,040$, zero leakage) and position-biased simulated A/B testing (+11.18% CTR lift, $p=0.0002$).
+
+2. **World Cinema Explorer (Content-Based Filtering)**:
+   - **Catalog**: 33,400+ international feature films from IMDb non-commercial datasets (`titleType=movie`, `numVotes >= 2000`, valid release year).
+   - **Architecture**: Content TF-IDF vectorization over genres, spoken languages, and approximate country/region of origin $\to$ Bayesian rating/vote quality priors $\to$ cosine profile similarity $\to$ MMR diversity re-ranking ($\lambda=0.7$).
+   - **Features**: Dynamically shifts taste profiles as the user likes movies; rich multi-dimensional filtering by approximate origin region (e.g. FR, JP, IN, IT, GB, US), language, genre, and data-driven release year ranges.
+   - **Evaluation**: Honest leave-one-out content similarity ($N=500$ probes, 91.2% Hit@10, 95.8% Hit@20, +6.16% ILD improvement).
+
+---
+
 ## 📊 Offline Recommender Ablation Table
 
 Evaluated on the strict leave-one-out time-based MovieLens 1M test set ($N=6,040$ users; last interaction = test, second-last = validation, rest = train, **zero future leakage**):
@@ -149,14 +167,41 @@ flowchart TD
 
 ---
 
-## ⚠️ Honest Limitations
+## ⚠️ Honest Limitations & Methodology Integrity
 
 1. **Simulated A/B Testing**:
    - The A/B experiment reported on the `/ab` dashboard is explicitly labeled **SIMULATED**. It computes click examinations using a synthetic position-bias model ($1 / \log_2(\text{rank} + 1)$) on held-out user interactions ($N=5,000$ sessions). While mathematically sound for evaluating relative CTR lift (+11.18%, $p = 0.0002$), it cannot fully capture real-world human behavioral novelty or session exploration.
 2. **MovieLens 1M Dataset Scope**:
-   - The dataset reflects movie ratings collected between 2000 and 2003 on 3,952 movies. It does not reflect modern streaming catalogs, real-time media consumption patterns, or contemporary titles.
-3. **Offline Metrics as Proxies**:
+   - The MovieLens 1M dataset reflects movie ratings collected between 2000 and 2003 on 3,952 movies. It does not reflect modern streaming catalogs, real-time media consumption patterns, or contemporary titles.
+3. **No Collaborative Performance Claims on World Cinema (IMDb)**:
+   - The IMDb non-commercial datasets do **not** provide user-level interaction histories or individual rating logs (only aggregate vote counts and average ratings). Consequently, **NO collaborative filtering performance (collaborative Recall@K, user NDCG) is claimed or reported for World Cinema**. Evaluation is strictly and honestly based on content-based leave-one-out neighbor recovery.
+4. **Approximate Origin Region**:
+   - Origin regions in World Cinema are derived from `title.akas` where `isOriginalTitle=1` or original release attributes. While highly accurate for the vast majority of titles, festival premieres or international co-productions can occasionally reflect premiere territory rather than primary production nationality (hence labeled "approximate origin region" everywhere in the UI and API).
+5. **Offline Metrics as Proxies**:
    - Offline Recall@K and NDCG@K measure the recovery of a single historical leave-one-out interaction. They penalize serendipitous or novel recommendations that the user would have loved simply because they were not recorded in the historical log.
+
+---
+
+## 🌍 World Cinema Recommender Evaluation (Leave-One-Out)
+
+Evaluated strictly via **leave-one-out content similarity** on verified items from the IMDb non-commercial catalog ($N=500$ evaluation probes):
+
+| Pipeline Configuration | Hit Rate@10 | Hit Rate@20 | Target Cosine Sim@10 | Intra-List Diversity (ILD@10) | Unique Catalog Coverage |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Pure Content (TF-IDF + Prior, $\lambda=1.0$)** | **0.9080** | — | **0.8374** | 0.2033 | 4,262 |
+| **Content + MMR Diversity ($\lambda=0.7$)** | 0.9120 | **0.9580** | 0.8335 | **0.2159** (+6.16%) | **7,627** (+78.9%) |
+
+- **Genre Overlap Consistency@10**: **96.0%** of recommended items share primary genre classifications with the probe movie.
+- **Origin Region Consistency@10**: **92.4%** of unconstrained recommendations preserve the approximate origin region.
+- **Intra-List Diversity Lift**: MMR ($\lambda=0.7$) provides **+6.16%** higher intra-list diversity over pure score while expanding catalog coverage by **+78.9%**.
+
+---
+
+## ⚖️ IMDb Non-Commercial Licensing & Attribution
+
+- **Attribution**: Information courtesy of IMDb (https://www.imdb.com). Used with permission for personal, non-commercial, and academic evaluation purposes.
+- **Dataset Source**: Official IMDb dataset dumps via `datasets.imdbws.com` (`title.basics.tsv.gz`, `title.ratings.tsv.gz`, `title.akas.tsv.gz`).
+- **Data Integrity & Storage Policy**: Raw TSV downloads are transiently processed during catalog building and are never checked into git. The compiled catalog is serialized into a lightweight, compressed Parquet artifact (`artifacts/global_catalog.parquet`, ~1.1 MB, well below the 50 MB repository budget).
 
 ---
 
