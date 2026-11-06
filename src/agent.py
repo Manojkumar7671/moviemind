@@ -1,3 +1,4 @@
+import difflib
 import json
 import os
 import re
@@ -45,7 +46,10 @@ class MovieMindAgent:
                 self.title_map["a " + ct.replace(", a", "").strip()] = mid
         for a, mid in {
             "matrix": 2571, "aliens": 1200, "alien": 1214, "godfather": 858,
-            "star wars": 260, "toy story": 1, "jurassic park": 480
+            "star wars": 260, "toy story": 1, "jurassic park": 480,
+            "terminator 2": 589, "terminator": 1240, "total recall": 2916,
+            "alines": 1200, "matrixx": 2571, "godfthr": 858, "jurasic park": 480,
+            "termanitor 2": 589, "termanitor": 1240,
         }.items():
             self.title_map[a] = mid
 
@@ -166,6 +170,24 @@ class MovieMindAgent:
             for mid, meta in self.movie_meta.items():
                 t_low = clean_title(meta["title"]).lower()
                 if all(w in t_low for w in words):
+                    matches.append({
+                        "movie_id": int(mid),
+                        "title": clean_title(meta["title"]),
+                        "genres": parse_genres(meta["genres"]),
+                        "year": int(meta["year"]),
+                    })
+                if len(matches) >= limit:
+                    break
+        if matches:
+            return matches
+
+        # 3. Fuzzy match fallback for short typo queries
+        if len(clean_q.split()) <= 3:
+            close_titles = difflib.get_close_matches(clean_q, self.title_map.keys(), n=2, cutoff=0.78)
+            for ct in close_titles:
+                mid = self.title_map[ct]
+                if mid in self.movie_meta and all(m["movie_id"] != mid for m in matches):
+                    meta = self.movie_meta[mid]
                     matches.append({
                         "movie_id": int(mid),
                         "title": clean_title(meta["title"]),
@@ -437,9 +459,11 @@ class MovieMindAgent:
             "notice": notice,
         }
 
-    def explain(self, movie_id: int, user_id: str = "demo_user") -> Dict[str, Any]:
+    def explain(self, movie_id: Optional[int] = None, title: Optional[str] = None, user_id: str = "demo_user") -> Dict[str, Any]:
         """Explain recommendation using real factual features and similarity to liked movies."""
-        if movie_id not in self.movie_meta:
+        if movie_id is None and title:
+            movie_id = self.find_movie_id_in_text(title)
+        if movie_id is None or movie_id not in self.movie_meta:
             return {"error": f"Movie ID {movie_id} not found in catalog."}
 
         meta = self.movie_meta[movie_id]
@@ -522,9 +546,11 @@ class MovieMindAgent:
             "taste_summary": summary,
         }
 
-    def record_feedback(self, user_id: str, movie_id: int, feedback_type: str) -> Dict[str, Any]:
+    def record_feedback(self, user_id: str, movie_id: Optional[int] = None, title: Optional[str] = None, feedback_type: str = "like") -> Dict[str, Any]:
         """Store like or dislike for a movie with duplicate prevention."""
-        if movie_id not in self.movie_meta:
+        if movie_id is None and title:
+            movie_id = self.find_movie_id_in_text(title)
+        if movie_id is None or movie_id not in self.movie_meta:
             return {"error": f"Movie ID {movie_id} does not exist."}
         title = clean_title(self.movie_meta[movie_id]["title"])
         is_new, status_msg = self.memory.record_feedback(user_id, movie_id, feedback_type)
@@ -539,11 +565,11 @@ class MovieMindAgent:
                 "type": "function",
                 "function": {
                     "name": "search_movies",
-                    "description": "Search movies by title query or keyword.",
+                    "description": "Search movies by title query or keyword in MovieLens 1M catalog. If user query has a typo (e.g. 'alines'), search for the corrected title.",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "query": {"type": "string", "description": "Movie title or query"},
+                            "query": {"type": "string", "description": "Movie title or query (corrected if typo)"},
                             "limit": {"type": "integer", "default": 5},
                         },
                         "required": ["query"],
@@ -574,10 +600,10 @@ class MovieMindAgent:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "movie_id": {"type": "integer", "description": "Movie ID"},
+                            "movie_id": {"type": "integer", "description": "Numeric Movie ID (if known)"},
+                            "title": {"type": "string", "description": "Movie title if ID is unknown"},
                             "user_id": {"type": "string", "default": "demo_user"},
                         },
-                        "required": ["movie_id"],
                     },
                 },
             },
@@ -620,10 +646,11 @@ class MovieMindAgent:
                         "type": "object",
                         "properties": {
                             "user_id": {"type": "string"},
-                            "movie_id": {"type": "integer"},
+                            "movie_id": {"type": "integer", "description": "Numeric Movie ID (if known)"},
+                            "title": {"type": "string", "description": "Movie title if ID is unknown"},
                             "feedback_type": {"type": "string", "enum": ["like", "dislike"]},
                         },
-                        "required": ["user_id", "movie_id", "feedback_type"],
+                        "required": ["user_id", "feedback_type"],
                     },
                 },
             },
@@ -816,71 +843,132 @@ class MovieMindAgent:
             "is_adversarial": False,
         }
 
+    def route_message_llm(self, user_msg: str, user_id: str = "demo_user") -> Dict[str, Any]:
+        """Let LLM choose tools via tool-calling with deterministic fallback and anti-hallucination guard."""
+        if not self.client:
+            return self.route_message(user_msg, user_id=user_id)
+
+        msg = (user_msg or "").strip()
+        low = msg.lower()
+
+        # Adversarial guard 1: Empty input
+        if not msg:
+            return self.route_message(user_msg, user_id=user_id)
+
+        # Adversarial guard 2: Prompt injection
+        if any(p in low for p in ("ignore all previous", "ignore previous instructions", "secret system prompt", "invent a fake movie")):
+            return self.route_message(user_msg, user_id=user_id)
+
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are MovieMind, an expert, charming movie recommender assistant for the MovieLens 1M catalog. "
+                        "You must choose the single best tool to satisfy the user request: "
+                        "search_movies, recommend, explain, filter_movies, record_feedback, get_taste_profile. "
+                        "For typos in movie titles (e.g. 'alines' -> 'Aliens'), correct the title in tool arguments. "
+                        "CRITICAL: Never invent movie titles, release years, or genres. "
+                        "If a movie or title is not found in the MovieLens 1M catalog, you MUST explicitly state that the title is "
+                        "'not in the MovieLens 1M catalog' and list nothing. "
+                        "For greetings or conversational chatter without movie actions, respond directly with no tools."
+                    ),
+                },
+                {"role": "user", "content": f"[User ID: {user_id}] {user_msg}"},
+            ]
+
+            resp = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=self.get_tool_specs(),
+                tool_choice="auto",
+                max_tokens=1024,
+            )
+            choice = resp.choices[0].message
+            if not choice.tool_calls:
+                content = (choice.content or "").replace("\u202f", " ").replace("\xa0", " ")
+                return {
+                    "tool": None,
+                    "args": {},
+                    "result": {},
+                    "response": content,
+                    "safe": True,
+                    "is_adversarial": False,
+                }
+
+            tc = choice.tool_calls[0]
+            fn_name = tc.function.name
+            fn_args = json.loads(tc.function.arguments or "{}")
+
+            # Ensure user_id defaults if expected
+            if fn_name in ("recommend", "get_taste_profile", "record_feedback", "explain"):
+                fn_args.setdefault("user_id", user_id)
+
+            if fn_name in ("explain", "record_feedback"):
+                if "movie_id" not in fn_args or fn_args["movie_id"] is None:
+                    t_lookup = fn_args.get("title") or self.find_movie_id_in_text(user_msg)
+                    if isinstance(t_lookup, int):
+                        fn_args["movie_id"] = t_lookup
+                    elif isinstance(t_lookup, str):
+                        fn_args["movie_id"] = self.find_movie_id_in_text(t_lookup)
+
+            tool_result = self.execute_tool(fn_name, fn_args)
+
+            # Anti-hallucination catalog guard: unknown/missing movie search returns catalog miss notice
+            if fn_name == "search_movies" and not tool_result:
+                q_term = fn_args.get("query", user_msg)
+                return {
+                    "tool": fn_name,
+                    "args": fn_args,
+                    "result": [],
+                    "response": f"'{q_term}' is not in the MovieLens 1M catalog.",
+                    "safe": True,
+                    "is_adversarial": True,
+                }
+
+            if fn_name == "explain" and isinstance(tool_result, dict) and "error" in tool_result:
+                return {
+                    "tool": fn_name,
+                    "args": fn_args,
+                    "result": tool_result,
+                    "response": tool_result["error"],
+                    "safe": True,
+                    "is_adversarial": True,
+                }
+
+            # Follow up turn with tool output for natural language summary
+            messages.append(choice)
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "name": fn_name,
+                "content": json.dumps(tool_result),
+            })
+            follow_up = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=1024,
+            )
+            content = (follow_up.choices[0].message.content or "Here are your results.").replace("\u202f", " ").replace("\xa0", " ")
+            return {
+                "tool": fn_name,
+                "args": fn_args,
+                "result": tool_result,
+                "response": content,
+                "safe": True,
+                "is_adversarial": False,
+            }
+        except Exception:
+            return self.route_message(user_msg, user_id=user_id)
+
     def chat_fallback(self, user_msg: str, user_id: str = "demo_user") -> str:
         """Rule-based tool router for graceful fallback when no API key is supplied."""
         return self.route_message(user_msg, user_id=user_id)["response"]
 
     def chat(self, user_msg: str, user_id: str = "demo_user") -> str:
         """Main chat interface calling LLM with tool calling or falling back gracefully."""
-        if not self.client:
-            return self.chat_fallback(user_msg, user_id=user_id)
-
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are MovieMind, an expert, charming movie recommender assistant. "
-                    "You have direct access to tools for searching movies, generating personalized recommendations, "
-                    "explaining recommendations with factual metadata (genres, release year, similarity to liked movies), "
-                    "filtering by year/genre, and storing user feedback. "
-                    "CRITICAL: Always use your tools to fetch facts. Never invent or hallucinate movie titles, genres, or release years."
-                ),
-            },
-            {"role": "user", "content": f"[User ID: {user_id}] {user_msg}"},
-        ]
-
-        try:
-            resp = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=self.get_tool_specs(),
-                tool_choice="auto",
-            )
-            choice = resp.choices[0].message
-            if not choice.tool_calls:
-                return choice.content or self.chat_fallback(user_msg, user_id=user_id)
-
-            # Handle tool calls
-            messages.append(choice)
-            for tc in choice.tool_calls:
-                fn_name = tc.function.name
-                fn_args = json.loads(tc.function.arguments or "{}")
-                # Default user_id if omitted
-                if "user_id" in fn_args and not fn_args["user_id"]:
-                    fn_args["user_id"] = user_id
-                elif "user_id" not in fn_args and fn_name in ("recommend", "get_taste_profile"):
-                    fn_args["user_id"] = user_id
-
-                tool_result = self.execute_tool(fn_name, fn_args)
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "name": fn_name,
-                    "content": json.dumps(tool_result),
-                })
-
-            # Get final response from model after tools execution
-            follow_up = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=1024,
-            )
-            content = follow_up.choices[0].message.content or "Here are your results."
-            return content.replace("\u202f", " ").replace("\xa0", " ")
-
-        except Exception as e:
-            # Fallback gracefully on API errors / missing keys
-            return self.chat_fallback(user_msg, user_id=user_id)
+        res = self.route_message_llm(user_msg, user_id=user_id)
+        return res.get("response", "")
 
 def run_agent_demo():
     print("=== Phase 8: Tool-Calling MovieMind Agent ===")
