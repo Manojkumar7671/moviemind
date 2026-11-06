@@ -18,7 +18,7 @@ def mmr_rerank(
     """Maximal Marginal Relevance (MMR) re-ranking balancing relevance and diversity."""
     n = len(item_ids)
     if n <= top_k or lmbda >= 1.0:
-        return [int(x) for x in item_ids[:top_k]]
+        return list(item_ids[:top_k])
 
     score_arr = np.array(scores, dtype=np.float32)
     s_min, s_max = float(score_arr.min()), float(score_arr.max())
