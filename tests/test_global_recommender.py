@@ -63,3 +63,43 @@ def test_global_recommender_filtering():
     assert len(eighties_recs) == 5
     for r in eighties_recs:
         assert 1980 <= r["year"] <= 1989
+
+def test_global_api_endpoints():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    client = TestClient(app)
+
+    # 1. Meta endpoint
+    res_meta = client.get("/api/global/meta")
+    assert res_meta.status_code == 200
+    meta = res_meta.json()
+    assert "regions" in meta and len(meta["regions"]) > 10
+    assert "languages" in meta and len(meta["languages"]) > 10
+    assert "genres" in meta and len(meta["genres"]) > 5
+    assert meta["year_min"] > 1880
+    assert meta["year_max"] >= 2020
+
+    # 2. Recommendations endpoint
+    res_rec = client.get("/api/global/recommend?n=6&region=FR")
+    assert res_rec.status_code == 200
+    data = res_rec.json()
+    assert "recommendations" in data
+    assert len(data["recommendations"]) == 6
+    for r in data["recommendations"]:
+        assert r["approx_origin_region"] == "FR"
+        assert "match_pct" in r
+        assert "explanation" in r
+
+    # 3. Feedback and why-this with string IMDb ID
+    fb_res = client.post("/api/feedback", json={
+        "user_id": "test_user_global",
+        "movie_id": "tt0047478",
+        "feedback_type": "like"
+    })
+    assert fb_res.status_code == 200
+    assert fb_res.json()["status"] in ("success", "noop")
+
+    why_res = client.get("/api/why-this?movie_id=tt0047478&user_id=test_user_global")
+    assert why_res.status_code == 200
+    why_data = why_res.json()
+    assert "1954" in why_data["text"] or "JP" in why_data["text"] or "Seven Samurai" in why_data["text"]

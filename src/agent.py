@@ -42,6 +42,13 @@ class MovieMindAgent:
             self.title_map[ct] = mid
             if ", the" in ct:
                 self.title_map["the " + ct.replace(", the", "").strip()] = mid
+
+        # Global catalog metadata if present
+        global_path = artifacts_dir / "global_catalog.parquet"
+        self.global_meta = {}
+        if global_path.exists():
+            gdf = pd.read_parquet(global_path)
+            self.global_meta = gdf.set_index("id").to_dict(orient="index")
             if ", a" in ct:
                 self.title_map["a " + ct.replace(", a", "").strip()] = mid
         for a, mid in {
@@ -602,17 +609,20 @@ class MovieMindAgent:
             "taste_summary": summary,
         }
 
-    def record_feedback(self, user_id: str, movie_id: Optional[int] = None, title: Optional[str] = None, feedback_type: str = "like") -> Dict[str, Any]:
+    def record_feedback(self, user_id: str, movie_id: Optional[Any] = None, title: Optional[str] = None, feedback_type: str = "like") -> Dict[str, Any]:
         """Store like or dislike for a movie with duplicate prevention."""
         if movie_id is None and title:
             movie_id = self.find_movie_id_in_text(title)
-        if movie_id is None or movie_id not in self.movie_meta:
+        meta = self.movie_meta.get(movie_id)
+        if meta is None and self.global_meta:
+            meta = self.global_meta.get(str(movie_id))
+        if meta is None:
             return {"error": f"Movie ID {movie_id} does not exist."}
-        title = clean_title(self.movie_meta[movie_id]["title"])
+        title_str = clean_title(meta["title"])
         is_new, status_msg = self.memory.record_feedback(user_id, movie_id, feedback_type)
         if not is_new and "already" in status_msg:
-            return {"status": "noop", "message": f"'{title}' is already {feedback_type}d."}
-        return {"status": "success", "message": f"Recorded {feedback_type} for '{title}'."}
+            return {"status": "noop", "message": f"'{title_str}' is already {feedback_type}d."}
+        return {"status": "success", "message": f"Recorded {feedback_type} for '{title_str}'."}
 
     # ================= DISPATCHER & CHAT =================
     def get_tool_specs(self) -> List[Dict]:

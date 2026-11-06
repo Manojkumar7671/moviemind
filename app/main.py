@@ -18,6 +18,7 @@ from src.agent import MovieMindAgent
 from src.baselines import ALL_GENRES
 from src.coldstart import ColdStartRecommender
 from src.taste_map import TasteMapService
+from src.global_recommender import GlobalContentRecommender
 
 app = FastAPI(title="MovieMind", version="1.0.0")
 
@@ -37,6 +38,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 agent = MovieMindAgent()
 coldstart = ColdStartRecommender()
 taste_map_service = TasteMapService()
+global_recommender = GlobalContentRecommender()
 
 class ChatRequest(BaseModel):
     message: str
@@ -48,7 +50,7 @@ class OnboardingRequest(BaseModel):
 
 class FeedbackRequest(BaseModel):
     user_id: Optional[str] = "demo_user"
-    movie_id: int
+    movie_id: Any
     feedback_type: str
 
 class RecommendRequest(BaseModel):
@@ -97,8 +99,62 @@ def get_recommendations(user_id: str = "demo_user", n: int = 6):
     return agent.recommend_detailed(user_id, n=n)
 
 @app.get("/api/why-this")
-def get_why_this(movie_id: int, user_id: str = "demo_user"):
-    return agent.get_grounded_explanation(movie_id, user_id=user_id)
+def get_why_this(movie_id: Any, user_id: str = "demo_user"):
+    mid_str = str(movie_id)
+    if mid_str in global_recommender.id_to_idx:
+        row = global_recommender.df.iloc[global_recommender.id_to_idx[mid_str]]
+        genres = [g.strip() for g in row["genres"].split("|") if g.strip()]
+        return {
+            "movie_id": mid_str,
+            "text": f"{row['title']} ({row['year']}) is an acclaimed {row['approx_origin_region']} feature with {row['rating']}/10 across {row['votes']:,} IMDb ratings, matching your interest in {', '.join(genres[:2])}.",
+            "matched_genres": genres[:2],
+            "similar_liked_movies": [],
+            "cached": True,
+            "llm_fallback": True,
+        }
+    return agent.get_grounded_explanation(int(movie_id) if str(movie_id).isdigit() else movie_id, user_id=user_id)
+
+@app.get("/api/global/meta")
+def get_global_meta():
+    return {
+        "year_min": global_recommender.min_year,
+        "year_max": global_recommender.max_year,
+        "regions": global_recommender.available_regions,
+        "languages": global_recommender.available_languages,
+        "genres": global_recommender.available_genres,
+    }
+
+@app.get("/api/global/recommend")
+def get_global_recommend(
+    user_id: str = "demo_user",
+    region: Optional[str] = None,
+    language: Optional[str] = None,
+    genre: Optional[str] = None,
+    year_min: Optional[int] = None,
+    year_max: Optional[int] = None,
+    n: int = 12,
+    lmbda: float = 0.7,
+):
+    fb = agent.memory.get_feedback(user_id)
+    liked_ids = [str(m) for m in fb["liked"]]
+    genres = [g.strip() for g in genre.split(",") if g.strip()] if genre else None
+    t0 = time.perf_counter()
+    recs = global_recommender.recommend(
+        liked_ids=liked_ids,
+        genres=genres,
+        region=region if region and region != "all" else None,
+        language=language if language and language != "all" else None,
+        year_min=year_min,
+        year_max=year_max,
+        n=n,
+        lmbda=lmbda,
+    )
+    total_ms = round((time.perf_counter() - t0) * 1000, 2)
+    return {
+        "recommendations": recs,
+        "total_ms": total_ms,
+        "count": len(recs),
+    }
 
 @app.get("/api/taste-map")
 def get_taste_map(user_id: str = "demo_user"):

@@ -1,7 +1,7 @@
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 from src.utils import clean_title
 
@@ -41,13 +41,14 @@ class UserMemory:
             """)
             conn.commit()
 
-    def record_feedback(self, user_id: str, movie_id: int, feedback_type: str) -> Tuple[bool, str]:
+    def record_feedback(self, user_id: str, movie_id: Any, feedback_type: str) -> Tuple[bool, str]:
         if feedback_type not in ("like", "dislike"):
             raise ValueError(f"Invalid feedback_type: {feedback_type}")
+        mid_str = str(movie_id)
         with self.get_conn() as conn:
             cur = conn.execute(
                 "SELECT feedback_type FROM feedback WHERE user_id = ? AND movie_id = ?",
-                (str(user_id), int(movie_id)),
+                (str(user_id), mid_str),
             )
             existing = cur.fetchone()
             if existing:
@@ -56,7 +57,7 @@ class UserMemory:
                 # Updated from like to dislike or vice versa
                 conn.execute(
                     "UPDATE feedback SET feedback_type = ?, created_at = ? WHERE user_id = ? AND movie_id = ?",
-                    (feedback_type, datetime.utcnow(), str(user_id), int(movie_id)),
+                    (feedback_type, datetime.utcnow(), str(user_id), mid_str),
                 )
                 conn.commit()
                 self.refresh_taste_summary(str(user_id))
@@ -64,21 +65,21 @@ class UserMemory:
 
             conn.execute(
                 "INSERT INTO feedback (user_id, movie_id, feedback_type, created_at) VALUES (?, ?, ?, ?)",
-                (str(user_id), int(movie_id), feedback_type, datetime.utcnow()),
+                (str(user_id), mid_str, feedback_type, datetime.utcnow()),
             )
             conn.commit()
         self.refresh_taste_summary(str(user_id))
         return True, f"recorded {feedback_type}"
 
-    def get_feedback(self, user_id: str) -> Dict[str, List[int]]:
+    def get_feedback(self, user_id: str) -> Dict[str, List[Any]]:
         with self.get_conn() as conn:
             cur = conn.execute(
                 "SELECT movie_id, feedback_type FROM feedback WHERE user_id = ? ORDER BY created_at DESC",
                 (str(user_id),),
             )
             rows = cur.fetchall()
-        liked = [r["movie_id"] for r in rows if r["feedback_type"] == "like"]
-        disliked = [r["movie_id"] for r in rows if r["feedback_type"] == "dislike"]
+        liked = [int(r["movie_id"]) if str(r["movie_id"]).isdigit() else str(r["movie_id"]) for r in rows if r["feedback_type"] == "like"]
+        disliked = [int(r["movie_id"]) if str(r["movie_id"]).isdigit() else str(r["movie_id"]) for r in rows if r["feedback_type"] == "dislike"]
         return {"liked": liked, "disliked": disliked}
 
     def get_taste_summary(self, user_id: str) -> str:
@@ -110,6 +111,13 @@ class UserMemory:
         if movies_df is None:
             movies_df = pd.read_parquet(DATA_DIR / "movies.parquet")
         meta = movies_df.set_index("movie_id").to_dict(orient="index")
+        global_path = Path(__file__).resolve().parent.parent / "artifacts" / "global_catalog.parquet"
+        if global_path.exists():
+            gdf = pd.read_parquet(global_path)
+            for _, grow in gdf.iterrows():
+                gid = str(grow["id"])
+                if gid not in meta:
+                    meta[gid] = {"title": grow["title"], "genres": grow["genres"]}
 
         liked_titles = [clean_title(meta[m]["title"]) for m in fb["liked"] if m in meta]
         disliked_titles = [clean_title(meta[m]["title"]) for m in fb["disliked"] if m in meta]

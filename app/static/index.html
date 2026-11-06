@@ -22,6 +22,7 @@
 
     <nav class="nav-tabs" aria-label="Main Navigation">
       <button class="tab-btn active" data-tab="discover" aria-selected="true" role="tab">Discover</button>
+      <button class="tab-btn" data-tab="world" aria-selected="false" role="tab">World cinema</button>
       <button class="tab-btn" data-tab="tastemap" aria-selected="false" role="tab">Taste Map</button>
       <button class="tab-btn" data-tab="eval" aria-selected="false" role="tab">Evaluation</button>
     </nav>
@@ -73,6 +74,58 @@
 
       <!-- Movie Grid -->
       <div class="movie-grid" id="movieGrid">
+        <!-- Rendered by JS -->
+      </div>
+    </section>
+
+    <!-- Tab 2: World cinema -->
+    <section class="tab-content" id="worldTab" role="tabpanel" aria-labelledby="world-tab">
+      <div class="onboarding-banner" style="margin-bottom:24px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+          <div>
+            <h2 class="section-title">World Cinema Explorer</h2>
+            <p class="section-subtitle">Content-based recommender across 10,000+ global feature films from IMDb non-commercial data with TF-IDF, Bayesian quality priors, and MMR diversity. Filter by approximate origin region, language, genre, and release year.</p>
+          </div>
+          <span class="live-indicator" style="background:rgba(79,181,165,0.15); color:var(--retro); border:1px solid rgba(79,181,165,0.4); padding:4px 10px; border-radius:6px; font-weight:700;">IMDb NON-COMMERCIAL</span>
+        </div>
+
+        <!-- Filter Controls -->
+        <div class="world-filter-bar" role="search" aria-label="World cinema filters" style="margin-top:16px; display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end;">
+          <div class="filter-group">
+            <label class="filter-label" for="worldRegionSelect">Approx. origin region</label>
+            <select id="worldRegionSelect" class="filter-select">
+              <option value="">All regions</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label" for="worldLanguageSelect">Language</label>
+            <select id="worldLanguageSelect" class="filter-select">
+              <option value="">All languages</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label" for="worldGenreSelect">Genre</label>
+            <select id="worldGenreSelect" class="filter-select">
+              <option value="">All genres</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label" for="worldYearMin">Release year</label>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input type="number" id="worldYearMin" class="filter-input-year" placeholder="Min">
+              <span style="color:var(--muted); font-size:12px;">to</span>
+              <input type="number" id="worldYearMax" class="filter-input-year" placeholder="Max">
+            </div>
+          </div>
+          <div class="filter-actions" style="display:flex; gap:8px;">
+            <button class="btn-primary" onclick="applyWorldFilters()">Apply filters</button>
+            <button class="btn-secondary" onclick="resetWorldFilters()">Reset</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- World Movie Grid -->
+      <div class="movie-grid" id="worldMovieGrid">
         <!-- Rendered by JS -->
       </div>
     </section>
