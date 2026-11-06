@@ -78,14 +78,31 @@ class MovieMindAgent:
         self.item_ids = np.load(artifacts_dir / "item_ids.npy")
         self.mid_to_idx = {int(mid): idx for idx, mid in enumerate(self.item_ids)}
 
-        # Setup OpenRouter / OpenAI client
-        self.api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
-        self.model = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
+        # Setup LLM / OpenAI-compatible client
+        self.base_url = (
+            os.getenv("LLM_BASE_URL")
+            or os.getenv("OPENROUTER_BASE_URL")
+            or "https://api.groq.com/openai/v1"
+        ).strip()
+        self.api_key = (
+            os.getenv("LLM_API_KEY")
+            or os.getenv("OPENROUTER_API_KEY")
+            or ""
+        ).strip()
+        self.model = (
+            os.getenv("LLM_MODEL")
+            or os.getenv("OPENROUTER_MODEL")
+            or "openai/gpt-oss-20b"
+        ).strip()
         self.client = None
         if self.api_key:
             try:
                 from openai import OpenAI
-                self.client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=self.api_key)
+                self.client = OpenAI(
+                    base_url=self.base_url,
+                    api_key=self.api_key,
+                    default_headers={"User-Agent": "MovieMind/1.0 (Mozilla/5.0; AI Assistant)"},
+                )
             except Exception as e:
                 print(f"Warning: could not initialize OpenAI client: {e}")
 
@@ -853,8 +870,10 @@ class MovieMindAgent:
             follow_up = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
+                max_tokens=1024,
             )
-            return follow_up.choices[0].message.content or "Here are your results."
+            content = follow_up.choices[0].message.content or "Here are your results."
+            return content.replace("\u202f", " ").replace("\xa0", " ")
 
         except Exception as e:
             # Fallback gracefully on API errors / missing keys
