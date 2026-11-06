@@ -378,35 +378,38 @@ class MovieMindAgent:
                 },
             })
 
-        # Enrich via OpenRouter LLM if client is ready
+        # Enrich via LLM if client is ready (one short grounded sentence)
         if self.client and cards:
             try:
                 prompt = (
-                    "User prefers " + str(pref_genres) + 
-                    ". For these movies, output a JSON array of 1-sentence reasons citing real genres/similar movies:\n" +
+                    "You are MovieMind. Write exactly one short, grounded sentence explaining why each movie is recommended. "
+                    "Cite only real genres and similar liked movies provided. Never invent facts.\n"
+                    f"User prefers: {pref_genres}\n"
+                    "Movies:\n" +
                     "\n".join([f"- {c['title']} ({c['year']}): genres={c['genres']}, similar_to={c['explanation']['similar_liked_movies']}" for c in cards]) +
-                    "\nFormat: [\"reason1\", ...]"
+                    "\nReturn valid JSON array of strings: [\"reason 1\", ...]"
                 )
                 resp = self.client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.2,
+                    max_tokens=1024,
                 )
-                content = resp.choices[0].message.content or "[]"
+                content = (resp.choices[0].message.content or "[]").replace("\u202f", " ").replace("\xa0", " ")
                 match = re.search(r"\[.*\]", content, re.DOTALL)
                 if match:
                     reasons = json.loads(match.group(0))
                     if len(reasons) == len(cards):
                         for c, r_text in zip(cards, reasons):
                             if isinstance(r_text, str) and len(r_text) > 8:
-                                c["explanation"]["text"] = r_text
+                                c["explanation"]["text"] = r_text.strip()
                         llm_fallback = False
             except Exception as e:
                 llm_fallback = True
-                notice = f"LLM offline ({type(e).__name__}); using deterministic data chips."
+                notice = f"Fallback active: LLM unavailable ({type(e).__name__}); using deterministic data chips."
 
         if llm_fallback and not notice:
-            notice = "Serving offline with data chips explanation (no OpenRouter API key configured)."
+            notice = "Fallback active: using deterministic data chips (LLM API key not configured)."
 
         t_llm1 = time.perf_counter()
         llm_ms = (t_llm1 - t_llm0) * 1000

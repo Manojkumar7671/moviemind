@@ -285,10 +285,23 @@ async function saveGenres() {
     const data = await res.json();
     showToast(`Taste profile saved: ${genresList.join(', ')}`);
     document.getElementById('onboardingBanner').style.display = 'none';
-    renderMovieGrid(data.recommendations, data.trace, data.latency_ms);
+    updateFallbackNotice(data.llm_fallback, data.notice);
+    renderMovieGrid(data.recommendations, data.trace, data.latency_ms, data.llm_fallback);
     await loadTasteMap();
   } catch (err) {
     showToast("Failed to save genres: " + err);
+  }
+}
+
+function updateFallbackNotice(isFallback, noticeText) {
+  const el = document.getElementById('llmFallbackNotice');
+  const txt = document.getElementById('llmFallbackNoticeText');
+  if (!el || !txt) return;
+  if (isFallback && noticeText) {
+    txt.innerText = noticeText;
+    el.style.display = 'flex';
+  } else {
+    el.style.display = 'none';
   }
 }
 
@@ -309,13 +322,14 @@ async function loadRecommendations() {
     });
     const data = await res.json();
     state.movies = data.recommendations || [];
-    renderMovieGrid(state.movies, data.trace, data.latency_ms);
+    updateFallbackNotice(data.llm_fallback, data.notice);
+    renderMovieGrid(state.movies, data.trace, data.latency_ms, data.llm_fallback);
   } catch (err) {
     grid.innerHTML = `<div class="meta-chip">Failed to load recommendations: ${err}</div>`;
   }
 }
 
-function renderMovieGrid(movies, trace = [], latency = {}) {
+function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false) {
   const grid = document.getElementById('movieGrid');
   grid.innerHTML = '';
 
@@ -384,7 +398,7 @@ function renderMovieGrid(movies, trace = [], latency = {}) {
           </div>
         </div>
         <div class="why-drawer" id="why-${movie.movie_id}">
-          <div class="why-explanation-text">${movie.explanation?.text || 'Recommended based on your taste profile.'}</div>
+          <div class="why-explanation-text">${movie.explanation?.text || 'Recommended based on your taste profile.'} ${isFallback ? '<span class="fallback-badge">fallback active</span>' : ''}</div>
           <div class="why-chips-row">${matchedChips} ${similarChips}</div>
 
           <!-- Per-stage latency telemetry -->

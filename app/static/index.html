@@ -56,6 +56,12 @@
         <button class="btn-primary" onclick="saveGenres()">Save genres</button>
       </div>
 
+      <!-- Fallback Notice Banner -->
+      <div id="llmFallbackNotice" class="fallback-notice-banner" style="display:none;" role="status" aria-live="polite">
+        <span class="fallback-notice-icon">⚡</span>
+        <span id="llmFallbackNoticeText">Fallback active: using deterministic data chips.</span>
+      </div>
+
       <!-- Movie Grid -->
       <div class="movie-grid" id="movieGrid">
         <!-- Rendered by JS -->
