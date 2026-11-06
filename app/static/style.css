@@ -248,6 +248,51 @@ main.app-viewport {
   box-shadow: var(--card-shadow);
 }
 
+.genres-summary-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-5);
+  font-size: 13px;
+}
+
+.genres-summary-content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.genres-summary-label {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.genres-summary-chips {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.btn-summary-edit {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-summary-edit:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
 .onboarding-header {
   display: flex;
   justify-content: space-between;

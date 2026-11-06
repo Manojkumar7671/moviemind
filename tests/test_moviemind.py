@@ -143,6 +143,7 @@ def test_api_smoke_test():
     r = client.get("/")
     assert r.status_code == 200
     assert "MovieMind" in r.text
+    assert "onboardingSummaryBar" in r.text
 
     r = client.get("/ab")
     assert r.status_code == 200
@@ -150,7 +151,10 @@ def test_api_smoke_test():
 
     # Static assets
     assert client.get("/static/style.css").status_code == 200
-    assert client.get("/static/app.js").status_code == 200
+    js_resp = client.get("/static/app.js")
+    assert js_resp.status_code == 200
+    assert "Relative match" in js_resp.text
+    assert "editGenres" in js_resp.text
     assert client.get("/static/fonts/Anton-Regular.ttf").status_code == 200
 
 # 6. Test: explain() excludes target movie from its own similar-to-liked list

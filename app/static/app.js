@@ -297,12 +297,34 @@ async function saveGenres() {
     const data = await res.json();
     showToast(`Taste profile saved: ${genresList.join(', ')}`);
     document.getElementById('onboardingBanner').style.display = 'none';
+    const summaryBar = document.getElementById('onboardingSummaryBar');
+    if (summaryBar) {
+      summaryBar.style.display = 'flex';
+      document.getElementById('summaryGenresList').innerText = genresList.join(', ');
+    }
     updateFallbackNotice(data.llm_fallback, data.notice);
     renderMovieGrid(data.recommendations, data.trace, data.latency_ms, data.llm_fallback);
     await loadTasteMap();
   } catch (err) {
     showToast("Failed to save genres: " + err);
   }
+}
+
+function skipOnboarding() {
+  document.getElementById('onboardingBanner').style.display = 'none';
+  const summaryBar = document.getElementById('onboardingSummaryBar');
+  if (summaryBar) {
+    summaryBar.style.display = 'flex';
+    document.getElementById('summaryGenresList').innerText = 'All genres (Popular picks)';
+  }
+  showToast("Showing popular recommendations for you.");
+}
+
+function editGenres() {
+  const summaryBar = document.getElementById('onboardingSummaryBar');
+  if (summaryBar) summaryBar.style.display = 'none';
+  const banner = document.getElementById('onboardingBanner');
+  if (banner) banner.style.display = 'block';
 }
 
 function updateFallbackNotice(isFallback, noticeText) {
@@ -315,11 +337,6 @@ function updateFallbackNotice(isFallback, noticeText) {
   } else {
     el.style.display = 'none';
   }
-}
-
-function skipOnboarding() {
-  document.getElementById('onboardingBanner').style.display = 'none';
-  showToast("Showing popular recommendations for you.");
 }
 
 // Recommendations
@@ -393,7 +410,7 @@ function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false) {
         <div class="poster-content">
           <div class="poster-header">
             <span class="poster-year">${movie.year}</span>
-            <span class="poster-match-badge">${movie.match_pct}% Match</span>
+            <span class="poster-match-badge">${movie.match_pct}% Relative match</span>
           </div>
           <div class="poster-title-area">
             <h3 class="poster-title">${movie.title}</h3>
@@ -433,7 +450,7 @@ function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false) {
               <span>Retrieval: <strong>${movie.score_parts?.retrieval ?? 0.70}</strong></span>
               <span>Ranker: <strong>${movie.score_parts?.ranker ?? 0.75}</strong></span>
               <span>Diversity: <strong>${movie.score_parts?.diversity ?? 0.80}</strong></span>
-              <span>Match: <strong style="color:var(--primary);">${movie.match_pct}%</strong></span>
+              <span>Relative match: <strong style="color:var(--primary);">${movie.match_pct}%</strong></span>
             </div>
           </div>
         </div>
