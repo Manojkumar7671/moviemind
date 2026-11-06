@@ -326,3 +326,25 @@ def test_title_normalization_articles():
     results = agent.search_movies("Matrix", limit=3)
     assert any(r["title"] == "The Matrix" for r in results)
     assert not any(r["title"].endswith(", The") for r in results)
+
+# 13. Test: Off-topic input vs Movie catalog messages
+def test_off_topic_queries_return_movie_only_message():
+    from src.agent import MovieMindAgent
+    agent = MovieMindAgent()
+
+    off_topic_queries = [
+        "what is 2 + 2?",
+        "calculate 50 * 12",
+        "who was George Washington?",
+        "how do I make pizza dough?",
+        "write python code to reverse a list",
+    ]
+    for q in off_topic_queries:
+        res = agent.route_message(q)
+        assert res["tool"] is None
+        assert res["response"] == "I only help with movies. Try a title, genre, or year."
+
+    # Movie title queries that are not in catalog must keep the catalog message
+    movie_miss = agent.route_message("search for Avatar The Way of Water 2022")
+    assert movie_miss["tool"] == "search_movies"
+    assert "not in the MovieLens 1M catalog" in movie_miss["response"]

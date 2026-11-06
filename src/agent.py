@@ -740,6 +740,29 @@ class MovieMindAgent:
             return int(generic_num.group(1))
         return None
 
+    def is_off_topic(self, low: str) -> bool:
+        """Detect math, programming, or non-movie general knowledge questions."""
+        if re.search(r"\b(\d+\s*[\+\-\*\/\^=]\s*\d+)\b", low):
+            return True
+        if re.search(r"\b(calculate|solve|square root|multiply|divide|math|addition|subtraction|equation)\b", low):
+            return True
+        movie_cues = (
+            "movie", "film", "cinema", "actor", "actress", "director", "oscar", "hollywood",
+            "genre", "watch", "recommend", "suggest", "like", "favorite", "favourite", "taste",
+            "search", "find", "look up", "action", "adventure", "animation", "comedy", "crime",
+            "documentary", "drama", "fantasy", "noir", "horror", "musical", "mystery", "romance",
+            "sci-fi", "scifi", "thriller", "western"
+        )
+        if any(c in low for c in movie_cues) or bool(self.find_movie_id_in_text(low)):
+            return False
+        gen_patterns = [
+            r"^(what is|what's|who is|who was|who are|where is|when did|when was|how to|how do|how does|why is|why are)\b",
+            r"\b(capital of|president of|weather in|temperature in|stock price|recipe for|cook |bake |how many days)\b",
+            r"\b(write (a )?(python|code|program|script|function|poem|essay|story))\b",
+            r"\b(translate |french |spanish |german |meaning of )\b",
+        ]
+        return any(bool(re.search(p, low)) for p in gen_patterns)
+
     def route_message(self, user_msg: str, user_id: str = "demo_user") -> Dict[str, Any]:
         """Parse message, route to expected tool, execute, and return structured dispatch trace."""
         msg = (user_msg or "").strip()
@@ -763,6 +786,17 @@ class MovieMindAgent:
                 "args": {},
                 "result": {"error": "Prompt injection rejected"},
                 "response": "I cannot alter my instructions or invent non-existent movies. I am MovieMind, dedicated to recommending real movies from the MovieLens catalog.",
+                "safe": True,
+                "is_adversarial": True,
+            }
+
+        # Adversarial 3: Off-topic input (math, general questions)
+        if self.is_off_topic(low):
+            return {
+                "tool": None,
+                "args": {},
+                "result": {},
+                "response": "I only help with movies. Try a title, genre, or year.",
                 "safe": True,
                 "is_adversarial": True,
             }
@@ -920,12 +954,12 @@ class MovieMindAgent:
                 "is_adversarial": len(results) == 0,
             }
 
-        # Intent 8: Unrecognized - Never default to recommend
+        # Intent 8: Unrecognized / Off-topic
         return {
             "tool": None,
             "args": {},
             "result": {},
-            "response": "I didn't recognize that movie title or request. You can search for movies (e.g. 'tell me about Aliens'), ask for recommendations by genre (e.g. 'recommend 4 sci-fi movies'), or check your taste profile.",
+            "response": "I only help with movies. Try a title, genre, or year.",
             "safe": True,
             "is_adversarial": False,
         }
@@ -945,6 +979,17 @@ class MovieMindAgent:
         # Adversarial guard 2: Prompt injection
         if any(p in low for p in ("ignore all previous", "ignore previous instructions", "secret system prompt", "invent a fake movie")):
             return self.route_message(user_msg, user_id=user_id)
+
+        # Adversarial guard 3: Off-topic input (math, general questions)
+        if self.is_off_topic(low):
+            return {
+                "tool": None,
+                "args": {},
+                "result": {},
+                "response": "I only help with movies. Try a title, genre, or year.",
+                "safe": True,
+                "is_adversarial": True,
+            }
 
         try:
             messages = [
