@@ -580,7 +580,7 @@ class MovieMindAgent:
                 "type": "function",
                 "function": {
                     "name": "recommend",
-                    "description": "Recommend movies for a user with optional genre preferences.",
+                    "description": "Recommend movies for a user with optional genre preferences or similarity requests (e.g. 'something like Aliens', 'space movies with lasers').",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -641,7 +641,7 @@ class MovieMindAgent:
                 "type": "function",
                 "function": {
                     "name": "record_feedback",
-                    "description": "Record user feedback: 'like' or 'dislike'.",
+                    "description": "Record user feedback: 'like' or 'dislike' when user explicitly likes or dislikes a movie. Do NOT use for similarity requests.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -670,13 +670,18 @@ class MovieMindAgent:
 
     def find_movie_id_in_text(self, text: str) -> Optional[int]:
         """Resolve numeric ID or canonical movie title from text."""
-        low = text.lower()
-        num_match = re.search(r"\b(\d{1,6})\b", low)
-        if num_match:
-            return int(num_match.group(1))
+        low = (text or "").lower()
+        id_match = re.search(r"\b(?:movie(?:\s+id)?|id:?)\s*(\d{1,6})\b", low)
+        if id_match:
+            return int(id_match.group(1))
+        if low.strip().isdigit():
+            return int(low.strip())
         for t, mid in sorted(self.title_map.items(), key=lambda x: -len(x[0])):
             if len(t) >= 4 and re.search(r"\b" + re.escape(t) + r"\b", low):
                 return mid
+        generic_num = re.search(r"\b(\d{3,6})\b", low)
+        if generic_num:
+            return int(generic_num.group(1))
         return None
 
     def route_message(self, user_msg: str, user_id: str = "demo_user") -> Dict[str, Any]:
@@ -740,8 +745,10 @@ class MovieMindAgent:
                     "is_adversarial": False,
                 }
 
-        # Intent 3: Feedback queries
-        if re.search(r"\b(like|liked|love|loved|dislike|disliked|hate|hated)\b", low):
+        # Intent 3: Feedback queries (exclude 'something like', 'movies like', 'more like')
+        is_feedback_word = re.search(r"\b(like|liked|love|loved|dislike|disliked|hate|hated)\b", low)
+        is_sim_rec = bool(re.search(r"\b(something|movies?|films?|more)\s+like\b", low))
+        if is_feedback_word and not is_sim_rec:
             feedback_type = "dislike" if any(w in low for w in ("dislike", "hate")) else "like"
             mid = self.find_movie_id_in_text(low)
             if mid is not None:
@@ -756,7 +763,7 @@ class MovieMindAgent:
                 }
 
         # Intent 4: Taste profile queries
-        if any(w in low for w in ("taste", "profile", "history")):
+        if any(w in low for w in ("taste", "profile", "history", "what did i like", "what have i liked")):
             prof = self.get_taste_profile(user_id)
             return {
                 "tool": "get_taste_profile",
@@ -769,14 +776,35 @@ class MovieMindAgent:
 
         # Intent 5: Filter queries
         year_match = re.search(r"\b(19\d{2}|20\d{2})\b", low)
+        decade_match = re.search(r"\b(\d{2})s\b", low)
         all_genres = ["Action", "Adventure", "Animation", "Children's", "Comedy", "Crime", "Documentary", "Drama", "Fantasy", "Film-Noir", "Horror", "Musical", "Mystery", "Romance", "Sci-Fi", "Thriller", "War", "Western"]
+        genre_synonyms = {"thriller": "Thriller", "detective": "Mystery", "family": "Children's", "funny": "Comedy", "lasers": "Sci-Fi", "space": "Sci-Fi"}
         matched_genre = next((g for g in all_genres if g.lower() in low), None)
-        if "filter" in low or (year_match and any(w in low for w in ("from", "before", "after", "since", "released"))):
-            yr = int(year_match.group(1)) if year_match else None
-            min_y = yr if any(w in low for w in ("after", "since")) else None
-            max_y = yr if "before" in low else None
-            if ("from" in low or "released" in low) and yr and not min_y and not max_y:
-                min_y, max_y = yr, yr
+        if not matched_genre:
+            for syn_k, syn_v in genre_synonyms.items():
+                if syn_k in low:
+                    matched_genre = syn_v
+                    break
+
+        if "filter" in low or (year_match and any(w in low for w in ("from", "before", "after", "since", "released"))) or (decade_match and matched_genre) or ("newer" in low and ("than" in low or "like" in low)):
+            min_y, max_y = None, None
+            if decade_match:
+                d_val = int(decade_match.group(1))
+                c_val = 1900 if d_val >= 20 else 2000
+                min_y, max_y = c_val + d_val, c_val + d_val + 9
+            elif year_match:
+                yr = int(year_match.group(1))
+                min_y = yr if any(w in low for w in ("after", "since")) else None
+                max_y = yr if "before" in low else None
+                if ("from" in low or "released" in low) and yr and not min_y and not max_y:
+                    min_y, max_y = yr, yr
+            elif "newer" in low:
+                ref_mid = self.find_movie_id_in_text(low)
+                if ref_mid and ref_mid in self.movie_meta:
+                    min_y = int(self.movie_meta[ref_mid]["year"]) + 1
+                    if not matched_genre:
+                        matched_genre = parse_genres(self.movie_meta[ref_mid]["genres"])[0]
+
             results = self.filter_movies(genre=matched_genre, min_year=min_y, max_year=max_y, limit=5)
             lines = [f"- **{r['title']}** ({r['year']}) - [{', '.join(r['genres'])}]" for r in results]
             return {
@@ -790,14 +818,17 @@ class MovieMindAgent:
 
         # Intent 6: Explicit Recommendation queries
         is_rec_intent = (
-            any(w in low for w in ("recommend", "recommendation", "recommendations", "suggest", "suggestions", "what should i watch", "what to watch", "picks"))
+            any(w in low for w in ("recommend", "recommendation", "recommendations", "suggest", "suggestions", "what should i watch", "what to watch", "picks", "something like", "more like"))
             or bool(re.search(r"\bgive me\s+(\d+\s+)?([a-z\s-]+\s+)?movies?\b", low))
+            or any(k in low for k in ("funny", "space movies", "detective stories", "for family"))
         )
         if is_rec_intent:
             n_match = re.search(r"\b(\d+)\b", low)
             n_items = int(n_match.group(1)) if n_match else 5
             n_items = min(max(n_items, 1), 20)
             genres_to_rec = [g for g in all_genres if g.lower() in low]
+            if not genres_to_rec and matched_genre:
+                genres_to_rec = [matched_genre]
             recs = self.recommend(user_id=user_id, genres=genres_to_rec or None, n=n_items)
             lines = [f"{i+1}. **{r['title']}** ({r['year']}) - [{', '.join(r['genres'])}]" for i, r in enumerate(recs)]
             return {
@@ -868,6 +899,8 @@ class MovieMindAgent:
                         "You must choose the single best tool to satisfy the user request: "
                         "search_movies, recommend, explain, filter_movies, record_feedback, get_taste_profile. "
                         "For typos in movie titles (e.g. 'alines' -> 'Aliens'), correct the title in tool arguments. "
+                        "For similarity or 'something like X' requests, choose recommend or filter_movies. "
+                        "Only use record_feedback when user explicitly states they like/love or dislike/hate a movie. "
                         "CRITICAL: Never invent movie titles, release years, or genres. "
                         "If a movie or title is not found in the MovieLens 1M catalog, you MUST explicitly state that the title is "
                         "'not in the MovieLens 1M catalog' and list nothing. "

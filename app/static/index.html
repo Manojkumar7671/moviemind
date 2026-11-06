@@ -158,20 +158,24 @@
 
         <!-- Agent Evals Pass-Rate Table -->
         <div class="table-card">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
             <div>
               <h2 class="section-title">Agent Tool-Calling Evaluation Suite</h2>
-              <p class="section-subtitle">24 automated behavioral and adversarial test cases for tool routing and anti-hallucination.</p>
+              <p class="section-subtitle">47 automated behavioral, typo, multi-step, and adversarial test cases comparing LLM agent vs fallback router.</p>
             </div>
-            <span class="live-indicator" id="agentEvalSummary">24/24 passed (100%)</span>
+            <div style="display:flex; gap:8px;">
+              <span class="live-indicator" id="agentEvalSummary" style="background:rgba(16,185,129,0.15); color:#10B981; border:1px solid rgba(16,185,129,0.4); padding:4px 10px; border-radius:6px; font-weight:700;">LLM Agent: 100%</span>
+              <span class="live-indicator" id="agentEvalFallbackSummary" style="background:rgba(232,163,61,0.15); color:var(--primary); border:1px solid rgba(232,163,61,0.4); padding:4px 10px; border-radius:6px; font-weight:700;">Fallback Router: 100%</span>
+            </div>
           </div>
           <table class="eval-table">
             <thead>
               <tr>
                 <th>Test Suite Category</th>
                 <th>Cases</th>
-                <th>Passed</th>
-                <th>Pass Rate</th>
+                <th>LLM Agent</th>
+                <th>Fallback Router</th>
+                <th>Tool Tested</th>
               </tr>
             </thead>
             <tbody id="agentEvalTbody">

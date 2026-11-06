@@ -45,7 +45,9 @@
     "message": "recommend 4 sci-fi movies",
     "expected_tool": "recommend",
     "expected_args": {
-      "genres": ["Sci-Fi"],
+      "genres": [
+        "Sci-Fi"
+      ],
       "n": 4
     },
     "adversarial": false
@@ -56,7 +58,9 @@
     "message": "give me 5 action movies",
     "expected_tool": "recommend",
     "expected_args": {
-      "genres": ["Action"],
+      "genres": [
+        "Action"
+      ],
       "n": 5
     },
     "adversarial": false
@@ -67,7 +71,9 @@
     "message": "suggest movies for a comedy lover",
     "expected_tool": "recommend",
     "expected_args": {
-      "genres": ["Comedy"]
+      "genres": [
+        "Comedy"
+      ]
     },
     "adversarial": false
   },
@@ -329,5 +335,207 @@
     },
     "adversarial": false,
     "description": "Search intent: natural phrasing asking if a specific classic title is in catalog"
+  },
+  {
+    "id": "typo_alines",
+    "category": "typos",
+    "message": "tell me about alines",
+    "expected_tool": "search_movies",
+    "acceptable_tools": [
+      "search_movies"
+    ],
+    "expected_args": {
+      "query": "aliens"
+    },
+    "adversarial": false,
+    "description": "Typo query: alines should resolve to search for Aliens"
+  },
+  {
+    "id": "typo_jurasic_park",
+    "category": "typos",
+    "message": "find jurasic park",
+    "expected_tool": "search_movies",
+    "acceptable_tools": [
+      "search_movies"
+    ],
+    "expected_args": {
+      "query": "jurassic park"
+    },
+    "adversarial": false,
+    "description": "Typo query: jurasic park should resolve to search for Jurassic Park"
+  },
+  {
+    "id": "typo_godfthr",
+    "category": "typos",
+    "message": "search for godfthr",
+    "expected_tool": "search_movies",
+    "acceptable_tools": [
+      "search_movies"
+    ],
+    "expected_args": {
+      "query": "godfather"
+    },
+    "adversarial": false,
+    "description": "Typo query: godfthr should resolve to search for Godfather"
+  },
+  {
+    "id": "typo_matrixx",
+    "category": "typos",
+    "message": "why matrixx?",
+    "expected_tool": "explain",
+    "acceptable_tools": [
+      "explain"
+    ],
+    "expected_args": {
+      "movie_id": 2571
+    },
+    "adversarial": false,
+    "description": "Typo query: matrixx should resolve to explain Matrix (ID 2571)"
+  },
+  {
+    "id": "typo_termanitor",
+    "category": "typos",
+    "message": "I loved termanitor 2",
+    "expected_tool": "record_feedback",
+    "acceptable_tools": [
+      "record_feedback"
+    ],
+    "expected_args": {
+      "movie_id": 589,
+      "feedback_type": "like"
+    },
+    "adversarial": false,
+    "description": "Typo query: termanitor 2 should record like for Terminator 2 (ID 589)"
+  },
+  {
+    "id": "multistep_aliens_explain",
+    "category": "multi_step",
+    "message": "find Aliens and explain why I should watch it",
+    "expected_tool": "explain",
+    "acceptable_tools": [
+      "explain",
+      "search_movies"
+    ],
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Multi-step query: find and explain movie"
+  },
+  {
+    "id": "multistep_feedback_recommend",
+    "category": "multi_step",
+    "message": "record that I loved Toy Story and give me 3 animations",
+    "expected_tool": "record_feedback",
+    "acceptable_tools": [
+      "record_feedback",
+      "recommend",
+      "search_movies"
+    ],
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Multi-step query: record feedback and recommend animations"
+  },
+  {
+    "id": "multistep_matrix_filter",
+    "category": "multi_step",
+    "message": "search for Matrix and show me similar sci-fi from 1999",
+    "expected_tool": "filter_movies",
+    "acceptable_tools": [
+      "filter_movies",
+      "search_movies"
+    ],
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Multi-step query: search title and filter by year/genre"
+  },
+  {
+    "id": "multistep_taste_recommend",
+    "category": "multi_step",
+    "message": "what did I like so far and what should I watch next?",
+    "expected_tool": "get_taste_profile",
+    "acceptable_tools": [
+      "get_taste_profile",
+      "recommend"
+    ],
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Multi-step query: taste summary and next recommendation"
+  },
+  {
+    "id": "multistep_dislike_rec",
+    "category": "multi_step",
+    "message": "dislike movie 50 and recommend 4 comedy movies",
+    "expected_tool": "record_feedback",
+    "acceptable_tools": [
+      "record_feedback",
+      "recommend"
+    ],
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Multi-step query: dislike feedback and recommend comedies"
+  },
+  {
+    "id": "ambiguous_aliens_newer",
+    "category": "ambiguous",
+    "message": "something like Aliens but newer",
+    "expected_tool": "filter_movies",
+    "acceptable_tools": [
+      "filter_movies",
+      "recommend"
+    ],
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Ambiguous query: similarity to Aliens with recency constraint"
+  },
+  {
+    "id": "ambiguous_90s_thriller",
+    "category": "ambiguous",
+    "message": "good 90s thriller",
+    "expected_tool": "filter_movies",
+    "acceptable_tools": [
+      "filter_movies",
+      "recommend"
+    ],
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Ambiguous query: decade and genre request"
+  },
+  {
+    "id": "ambiguous_space_lasers",
+    "category": "ambiguous",
+    "message": "space movies with lasers",
+    "expected_tool": "recommend",
+    "acceptable_tools": [
+      "recommend",
+      "search_movies"
+    ],
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Ambiguous query: thematic Sci-Fi recommendation"
+  },
+  {
+    "id": "ambiguous_family_funny",
+    "category": "ambiguous",
+    "message": "something funny for family movie night",
+    "expected_tool": "recommend",
+    "acceptable_tools": [
+      "recommend",
+      "filter_movies"
+    ],
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Ambiguous query: comedy and family movie night"
+  },
+  {
+    "id": "ambiguous_dark_detective",
+    "category": "ambiguous",
+    "message": "classic dark detective stories",
+    "expected_tool": "recommend",
+    "acceptable_tools": [
+      "recommend",
+      "filter_movies"
+    ],
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Ambiguous query: Film-Noir / Mystery recommendation"
   }
 ]

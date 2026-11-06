@@ -1,9 +1,135 @@
 {
-  "total_cases": 32,
-  "passed": 32,
+  "total_cases": 47,
+  "passed": 47,
   "pass_rate_pct": 100.0,
+  "fallback_pass_rate_pct": 100.0,
+  "llm_pass_rate_pct": 100.0,
   "adversarial_passed": 4,
   "adversarial_total": 4,
+  "llm_agent": {
+    "total": 47,
+    "passed": 47,
+    "pass_rate_pct": 100.0,
+    "categories": {
+      "search": {
+        "total": 9,
+        "passed": 9,
+        "pass_rate_pct": 100.0
+      },
+      "recommend": {
+        "total": 4,
+        "passed": 4,
+        "pass_rate_pct": 100.0
+      },
+      "explain": {
+        "total": 4,
+        "passed": 4,
+        "pass_rate_pct": 100.0
+      },
+      "filter": {
+        "total": 4,
+        "passed": 4,
+        "pass_rate_pct": 100.0
+      },
+      "feedback": {
+        "total": 4,
+        "passed": 4,
+        "pass_rate_pct": 100.0
+      },
+      "profile": {
+        "total": 1,
+        "passed": 1,
+        "pass_rate_pct": 100.0
+      },
+      "adversarial": {
+        "total": 4,
+        "passed": 4,
+        "pass_rate_pct": 100.0
+      },
+      "greeting": {
+        "total": 2,
+        "passed": 2,
+        "pass_rate_pct": 100.0
+      },
+      "typos": {
+        "total": 5,
+        "passed": 5,
+        "pass_rate_pct": 100.0
+      },
+      "multi_step": {
+        "total": 5,
+        "passed": 5,
+        "pass_rate_pct": 100.0
+      },
+      "ambiguous": {
+        "total": 5,
+        "passed": 5,
+        "pass_rate_pct": 100.0
+      }
+    }
+  },
+  "fallback_router": {
+    "total": 47,
+    "passed": 47,
+    "pass_rate_pct": 100.0,
+    "categories": {
+      "search": {
+        "total": 9,
+        "passed": 9,
+        "pass_rate_pct": 100.0
+      },
+      "recommend": {
+        "total": 4,
+        "passed": 4,
+        "pass_rate_pct": 100.0
+      },
+      "explain": {
+        "total": 4,
+        "passed": 4,
+        "pass_rate_pct": 100.0
+      },
+      "filter": {
+        "total": 4,
+        "passed": 4,
+        "pass_rate_pct": 100.0
+      },
+      "feedback": {
+        "total": 4,
+        "passed": 4,
+        "pass_rate_pct": 100.0
+      },
+      "profile": {
+        "total": 1,
+        "passed": 1,
+        "pass_rate_pct": 100.0
+      },
+      "adversarial": {
+        "total": 4,
+        "passed": 4,
+        "pass_rate_pct": 100.0
+      },
+      "greeting": {
+        "total": 2,
+        "passed": 2,
+        "pass_rate_pct": 100.0
+      },
+      "typos": {
+        "total": 5,
+        "passed": 5,
+        "pass_rate_pct": 100.0
+      },
+      "multi_step": {
+        "total": 5,
+        "passed": 5,
+        "pass_rate_pct": 100.0
+      },
+      "ambiguous": {
+        "total": 5,
+        "passed": 5,
+        "pass_rate_pct": 100.0
+      }
+    }
+  },
   "categories": {
     "search": {
       "total": 9,
@@ -43,6 +169,21 @@
     "greeting": {
       "total": 2,
       "passed": 2,
+      "pass_rate_pct": 100.0
+    },
+    "typos": {
+      "total": 5,
+      "passed": 5,
+      "pass_rate_pct": 100.0
+    },
+    "multi_step": {
+      "total": 5,
+      "passed": 5,
+      "pass_rate_pct": 100.0
+    },
+    "ambiguous": {
+      "total": 5,
+      "passed": 5,
       "pass_rate_pct": 100.0
     }
   }

@@ -148,9 +148,11 @@ def get_eval():
     ]
 
     agent_eval_summary = {
-        "total_cases": 24,
-        "passed": 24,
+        "total_cases": 47,
+        "passed": 47,
         "pass_rate_pct": 100.0,
+        "llm_pass_rate_pct": 100.0,
+        "fallback_pass_rate_pct": 100.0,
         "adversarial_passed": 4,
         "adversarial_total": 4,
     }
