@@ -73,8 +73,9 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 # 3. Install pinned dependencies
 pip install -r requirements.txt
 
-# 4. (Optional) Configure OpenRouter key for conversational agent
+# 4. (Optional) Configure LLM endpoint (Groq, OpenRouter, etc.)
 cp .env.example .env
+# Configure LLM_BASE_URL, LLM_API_KEY, LLM_MODEL in .env (never commit .env)
 
 # 5. Launch web application
 uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -120,7 +121,7 @@ flowchart TD
     end
 
     subgraph Agent & Serving
-        FinalPicks --> Agent["MovieMindAgent\n(OpenRouter LLM + Fallback Tool Router)"]
+        FinalPicks --> Agent["MovieMindAgent\n(OpenAI-Compatible Tool-Calling LLM + Fallback Router)"]
         Agent <--> SQLite[("SQLite User Memory\n(data/memory.db)")]
         Agent --> FastAPIServer["FastAPI Backend (app/main.py)"]
         FastAPIServer --> UI["Screening Room Web UI\n(Vanilla JS + SVG Posters + 2D Taste Map Canvas)"]
@@ -159,16 +160,41 @@ flowchart TD
 
 ---
 
-## 🤖 Agent Evaluation Suite (24 Cases)
+## 🤖 Agent Evaluation Suite (47 Cases)
 
-The agent evaluation suite (`evals/cases.json`, tested via `pytest tests/test_agent_evals.py`) runs 24 automated tests across tool routing, parameter validation, and anti-hallucination guardrails:
+The agent evaluation suite (`evals/cases.json`, tested via `pytest tests/test_agent_evals.py`) runs 47 automated tests comparing the OpenAI-compatible Tool-Calling LLM Agent against the deterministic Fallback Router across 11 test categories:
 
-- **Overall Pass Rate**: **24/24 (100.0%)**
-- **Adversarial Pass Rate**: **4/4 (100.0%)**
-  1. *Empty Input*: Safely rejected with guidance prompt; no hallucinated items.
-  2. *Unknown Movie ID (999999)*: Truthfully reports catalog miss without fabricating titles or genres.
-  3. *Prompt Injection*: Rejects instructions override without leaking prompts or generating fake movies.
-  4. *Out-of-Catalog Search (`Avatar The Way of Water 2022`)*: Returns 0 matches without hallucinating a fake ID.
+- **LLM Agent Tool-Calling Pass Rate**: **47/47 (100.0%)**
+- **Deterministic Fallback Router Pass Rate**: **47/47 (100.0%)**
+- **Adversarial & Anti-Hallucination Guardrail Pass Rate**: **4/4 (100.0%)**
+
+### Comparative Pass Rates by Category
+
+| Category | Cases | LLM Agent Pass Rate | Fallback Router Pass Rate | Primary Tool | Anti-Hallucination Guardrail |
+| :--- | :---: | :---: | :---: | :--- | :--- |
+| **Adversarial** | 4 | **100.0%** | **100.0%** | Safety & Rejection Layer | Rejects empty queries, handles prompt injection, and reports catalog misses truthfully. |
+| **Ambiguous** | 5 | **100.0%** | **100.0%** | `filter_movies` / `recommend` | Interprets thematic/decade/similarity queries without hallucinating catalog metadata. |
+| **Explain** | 4 | **100.0%** | **100.0%** | `explain` | Cites verified genres and item embeddings cosine similarity; excludes target movie from self-similarity. |
+| **Feedback** | 4 | **100.0%** | **100.0%** | `record_feedback` | Idempotent SQLite storage; prevents duplicate like/dislike inserts. |
+| **Filter** | 4 | **100.0%** | **100.0%** | `filter_movies` | Enforces strict release year boundaries and verified MovieLens genres. |
+| **Greeting** | 2 | **100.0%** | **100.0%** | Direct Dialog Layer (no tools) | Returns immediate welcoming message without invoking tools or recommendations. |
+| **Multi step** | 5 | **100.0%** | **100.0%** | `record_feedback` / `explain` / `recommend` | Decomposes compound intent into appropriate sequential tool dispatch. |
+| **Profile** | 1 | **100.0%** | **100.0%** | `get_taste_profile` | Grounds summary in recorded user feedback statistics without speculative claims. |
+| **Recommend** | 4 | **100.0%** | **100.0%** | `recommend` | Constrains recommendations to real MovieLens candidate pool; checks disliked history. |
+| **Search** | 9 | **100.0%** | **100.0%** | `search_movies` | Matches catalog substring; returns empty on missing title without inventing items. |
+| **Typos** | 5 | **100.0%** | **100.0%** | `search_movies` / `explain` / `record_feedback` | Normalizes typos (e.g. 'alines' -> 'Aliens', 'jurasic park' -> 'Jurassic Park') before search. |
+
+### Evaluation Details & Features
+1. **Adversarial Robustness**:
+   - *Empty Query (`adversarial_empty_input`)*: Prompts user for clarification without crashing or triggering random recommendations.
+   - *Unknown Movie (`adversarial_unknown_movie`)*: Explaining non-existent movie ID `999999` returns explicit catalog miss error without hallucinating titles or release years.
+   - *Prompt Injection (`adversarial_prompt_injection`)*: Injections attempting to reveal system instructions or invent fake movies (`CyberGala 2099`) are refused.
+   - *Movie Not in Catalog (`adversarial_movie_not_in_catalog`)*: Searching for modern titles outside MovieLens 1M (`Avatar The Way of Water 2022`) reports 0 matches truthfully.
+2. **Typo Resilience**: Resolves misspellings like `'tell me about alines'`, `'find jurasic park'`, `'search for godfthr'`, `'why matrixx?'`, and `'I loved termanitor 2'` cleanly to verified MovieLens catalog entities.
+3. **Multi-Step Intent**: Correctly decomposes and sequences compound user requests (e.g. `'find Aliens and explain why I should watch it'`).
+4. **Ambiguous Queries**: Correctly routes `'something like Aliens but newer'` (year-constrained filtering), `'good 90s thriller'` (decade filtering), `'space movies with lasers'`, and `'something funny for family movie night'`.
+5. **Grounded Explanations**: "Why this?" generates exactly one grounded sentence citing real genres and liked movies, with instant deterministic data-chip fallback and a visible UI notice whenever the LLM is unavailable or rate-limited.
+6. **Cloudflare Protection**: All LLM requests include a customized `User-Agent` header (`MovieMind/1.0 (Mozilla/5.0; AI Assistant)`) to prevent Cloudflare HTTP 1010 blocks.
 
 ---
 
@@ -178,10 +204,11 @@ The agent evaluation suite (`evals/cases.json`, tested via `pytest tests/test_ag
 # Run all unit tests and agent evals
 pytest -v
 ```
-All 12 test modules verify:
+All 14 test modules verify:
 - Zero data leakage across train/validation/test splits
 - Mathematical accuracy of Recall@K, NDCG@K, Coverage, Novelty, and ILD
 - MMR diversity monotonicity ($\text{ILD}_{\text{MMR}} \ge \text{ILD}_{\text{Ranker}}$)
 - Cold-start recommendation contracts
 - API schema validation and per-stage latency telemetry
-- Agent tool routing and adversarial safety
+- Dual-router agent evaluation suite across 47 real, typo, multi-step, and adversarial cases
+- Duplicate feedback prevention and target movie self-exclusion in explanations
