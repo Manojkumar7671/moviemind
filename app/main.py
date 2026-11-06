@@ -96,6 +96,10 @@ def post_recommendations(req: RecommendRequest):
 def get_recommendations(user_id: str = "demo_user", n: int = 6):
     return agent.recommend_detailed(user_id, n=n)
 
+@app.get("/api/why-this")
+def get_why_this(movie_id: int, user_id: str = "demo_user"):
+    return agent.get_grounded_explanation(movie_id, user_id=user_id)
+
 @app.get("/api/taste-map")
 def get_taste_map(user_id: str = "demo_user"):
     fb = agent.memory.get_feedback(user_id)

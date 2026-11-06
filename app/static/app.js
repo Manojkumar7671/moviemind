@@ -398,7 +398,7 @@ function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false) {
           </div>
         </div>
         <div class="why-drawer" id="why-${movie.movie_id}">
-          <div class="why-explanation-text">${movie.explanation?.text || 'Recommended based on your taste profile.'} ${isFallback ? '<span class="fallback-badge">fallback active</span>' : ''}</div>
+          <div class="why-explanation-text" id="why-text-${movie.movie_id}">${movie.explanation?.text || 'Recommended based on your taste profile.'} ${isFallback ? '<span class="fallback-badge">fallback active</span>' : ''}</div>
           <div class="why-chips-row">${matchedChips} ${similarChips}</div>
 
           <!-- Per-stage latency telemetry -->
@@ -431,9 +431,28 @@ function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false) {
   });
 }
 
-function toggleWhy(id) {
+async function toggleWhy(id) {
   const drawer = document.getElementById(`why-${id}`);
-  if (drawer) drawer.classList.toggle('open');
+  if (!drawer) return;
+  const opening = !drawer.classList.contains('open');
+  drawer.classList.toggle('open');
+  if (opening) {
+    const textEl = document.getElementById(`why-text-${id}`);
+    if (textEl && !textEl.dataset.fetched) {
+      textEl.dataset.fetched = "true";
+      try {
+        const res = await fetch(`/api/why-this?movie_id=${id}&user_id=${encodeURIComponent(state.userId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.text) {
+            textEl.innerHTML = `${data.text} ${data.llm_fallback ? '<span class="fallback-badge">fallback active</span>' : ''}`;
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load Why this explanation:", err);
+      }
+    }
+  }
 }
 
 function toggleTrace(id) {

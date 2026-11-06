@@ -233,14 +233,36 @@ def test_api_recommend_schema_and_latency():
     assert "matched_genres" in card["explanation"]
     assert "similar_liked_movies" in card["explanation"]
 
-    # Latencies
+    # Latencies (recommend makes zero LLM calls)
     assert "latency_ms" in data
+    assert data["latency_ms"]["llm"] == 0.0
     for stage in ("retrieval", "ranker", "mmr", "llm", "total"):
         assert stage in data["latency_ms"]
         assert isinstance(data["latency_ms"][stage], (int, float))
 
     # Trace
     assert "trace" in data and len(data["trace"]) >= 4
+
+# 10. Test: Why-this on-demand endpoint and caching
+def test_why_this_endpoint_and_caching():
+    client = TestClient(app)
+    # /api/recommend has zero LLM calls
+    rec_r = client.post("/api/recommend", json={"user_id": "test_why_user", "genres": ["Action"], "n": 3})
+    assert rec_r.status_code == 200
+    assert rec_r.json()["latency_ms"]["llm"] == 0.0
+
+    # /api/why-this generates explanation
+    r = client.get("/api/why-this?movie_id=2571&user_id=test_why_user")
+    assert r.status_code == 200
+    d1 = r.json()
+    assert d1["movie_id"] == 2571
+    assert "text" in d1 and len(d1["text"]) > 10
+
+    # Second call returns cached result
+    r2 = client.get("/api/why-this?movie_id=2571&user_id=test_why_user")
+    assert r2.status_code == 200
+    d2 = r2.json()
+    assert d2["text"] == d1["text"]
 
 # 10. Test: Phase 2 Taste Map & Eval endpoints
 def test_api_taste_map_and_eval():

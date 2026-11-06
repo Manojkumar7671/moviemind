@@ -109,6 +109,7 @@ class MovieMindAgent:
                 )
             except Exception as e:
                 print(f"Warning: could not initialize OpenAI client: {e}")
+        self._explanation_cache = {}
 
     # ================= TOOLS =================
     def clean_search_query(self, text: str) -> str:
@@ -400,48 +401,13 @@ class MovieMindAgent:
                 },
             })
 
-        # Enrich via LLM if client is ready (one short grounded sentence)
-        if self.client and cards:
-            try:
-                prompt = (
-                    "You are MovieMind. Write exactly one short, grounded sentence explaining why each movie is recommended. "
-                    "Cite only real genres and similar liked movies provided. Never invent facts.\n"
-                    f"User prefers: {pref_genres}\n"
-                    "Movies:\n" +
-                    "\n".join([f"- {c['title']} ({c['year']}): genres={c['genres']}, similar_to={c['explanation']['similar_liked_movies']}" for c in cards]) +
-                    "\nReturn valid JSON array of strings: [\"reason 1\", ...]"
-                )
-                resp = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.2,
-                    max_tokens=1024,
-                )
-                content = (resp.choices[0].message.content or "[]").replace("\u202f", " ").replace("\xa0", " ")
-                match = re.search(r"\[.*\]", content, re.DOTALL)
-                if match:
-                    reasons = json.loads(match.group(0))
-                    if len(reasons) == len(cards):
-                        for c, r_text in zip(cards, reasons):
-                            if isinstance(r_text, str) and len(r_text) > 8:
-                                c["explanation"]["text"] = r_text.strip()
-                        llm_fallback = False
-            except Exception as e:
-                llm_fallback = True
-                notice = f"Fallback active: LLM unavailable ({type(e).__name__}); using deterministic data chips."
-
-        if llm_fallback and not notice:
-            notice = "Fallback active: using deterministic data chips (LLM API key not configured)."
-
-        t_llm1 = time.perf_counter()
-        llm_ms = (t_llm1 - t_llm0) * 1000
-        total_ms = (t_llm1 - t0) * 1000
+        total_ms = (time.perf_counter() - t0) * 1000
 
         trace = [
             {"stage": "retrieval", "tool": "two_tower_faiss", "args": {"user_id": user_id, "candidates": 200}, "latency_ms": round(retrieval_ms, 2)},
             {"stage": "ranker", "tool": "wide_and_deep", "args": {"candidates_scored": len(top_ranked)}, "latency_ms": round(ranker_ms, 2)},
             {"stage": "diversity", "tool": "mmr_rerank", "args": {"lambda": 0.7, "top_k": n}, "latency_ms": round(mmr_ms, 2)},
-            {"stage": "explanation", "tool": "factual_grounding", "args": {"source": "data_chips" if llm_fallback else "openrouter"}, "latency_ms": round(llm_ms, 2)},
+            {"stage": "explanation", "tool": "factual_grounding", "args": {"source": "data_chips"}, "latency_ms": 0.0},
         ]
 
         return {
@@ -451,13 +417,103 @@ class MovieMindAgent:
                 "retrieval": round(retrieval_ms, 2),
                 "ranker": round(ranker_ms, 2),
                 "mmr": round(mmr_ms, 2),
-                "llm": round(llm_ms, 2),
+                "llm": 0.0,
                 "total": round(total_ms, 2),
             },
             "trace": trace,
+            "llm_fallback": False,
+            "notice": None,
+        }
+
+    def get_grounded_explanation(self, movie_id: int, user_id: str = "demo_user") -> Dict[str, Any]:
+        """Fetch or generate 1-sentence grounded LLM explanation on demand, cached by (movie_id, user_state)."""
+        if movie_id not in self.movie_meta:
+            return {"error": f"Movie ID {movie_id} not found in catalog."}
+
+        meta = self.movie_meta[movie_id]
+        clean_t = clean_title(meta["title"])
+        m_genres = parse_genres(meta["genres"])
+        m_genres_set = set(m_genres)
+
+        fb = self.memory.get_feedback(user_id)
+        liked_ids = tuple(sorted(fb.get("liked", [])))
+        cache_key = (int(movie_id), str(user_id), liked_ids)
+
+        if cache_key in self._explanation_cache:
+            return self._explanation_cache[cache_key]
+
+        # Determine similar liked movies
+        similar_titles = []
+        if movie_id in self.mid_to_idx:
+            target_vec = self.item_embs[self.mid_to_idx[movie_id]]
+            for liked_id in liked_ids:
+                if liked_id == movie_id:
+                    continue
+                if liked_id in self.mid_to_idx and liked_id in self.movie_meta:
+                    sim = float(np.dot(target_vec, self.item_embs[self.mid_to_idx[liked_id]]))
+                    l_meta = self.movie_meta[liked_id]
+                    similar_titles.append((clean_title(l_meta["title"]), sim))
+            similar_titles.sort(key=lambda x: x[1], reverse=True)
+        top_similar = [t[0] for t in similar_titles[:2]]
+
+        pref_genres = fb.get("preferred_genres", [])
+        matched = list(m_genres_set.intersection(set(pref_genres))) if pref_genres else m_genres[:2]
+        if not matched:
+            matched = m_genres[:2]
+
+        if top_similar:
+            fallback_text = f"Recommended for your interest in {', '.join(matched)}, matching themes from '{top_similar[0]}'."
+        else:
+            fallback_text = f"Recommended for your interest in {', '.join(matched)}."
+
+        exp_text = fallback_text
+        llm_fallback = False
+        notice = None
+
+        if self.client:
+            prompt = (
+                f"You are MovieMind. Write exactly one short, grounded sentence explaining why '{clean_t}' ({meta['year']}) "
+                f"is recommended to the user. Cite only real genres ({', '.join(m_genres)}) and similar liked titles "
+                f"({', '.join(top_similar) if top_similar else 'none'}). Never invent facts."
+            )
+            for attempt in range(2):
+                try:
+                    resp = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.2,
+                        max_tokens=256,
+                    )
+                    raw = (resp.choices[0].message.content or "").strip().replace("\u202f", " ").replace("\xa0", " ")
+                    if raw.startswith('"') and raw.endswith('"'):
+                        raw = raw[1:-1].strip()
+                    if len(raw) > 8:
+                        exp_text = raw
+                    llm_fallback = False
+                    notice = None
+                    break
+                except Exception as e:
+                    is_429 = "429" in str(e) or "rate" in str(e).lower()
+                    if attempt == 0 and is_429:
+                        time.sleep(1.0)
+                        continue
+                    llm_fallback = True
+                    notice = "Fallback active: LLM rate-limited (429); using deterministic data chips." if is_429 else f"Fallback active: {type(e).__name__}"
+        else:
+            llm_fallback = True
+            notice = "Fallback active: deterministic data chips (LLM API key not configured)."
+
+        res = {
+            "movie_id": int(movie_id),
+            "title": clean_t,
+            "text": exp_text,
+            "matched_genres": matched,
+            "similar_liked_movies": top_similar,
             "llm_fallback": llm_fallback,
             "notice": notice,
         }
+        self._explanation_cache[cache_key] = res
+        return res
 
     def explain(self, movie_id: Optional[int] = None, title: Optional[str] = None, user_id: str = "demo_user") -> Dict[str, Any]:
         """Explain recommendation using real factual features and similarity to liked movies."""
