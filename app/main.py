@@ -70,6 +70,14 @@ class RecommendRequest(BaseModel):
 def healthcheck():
     return {"status": "ok", "app": "MovieMind", "version": "1.0.0"}
 
+@app.get("/healthz")
+def healthz():
+    return {
+        "status": "ok",
+        "llm_configured": bool(agent.client is not None),
+        "world_catalog_loaded": bool(global_recommender is not None and global_recommender.df is not None),
+    }
+
 @app.get("/api/genres")
 def get_genres():
     return {"genres": ALL_GENRES}
@@ -100,16 +108,23 @@ def onboarding(req: OnboardingRequest):
 @app.post("/api/recommend")
 def post_recommendations(req: RecommendRequest):
     uid = req.user_id or "demo_user"
-    return agent.recommend_detailed(uid, genres=req.genres, n=req.n or 6)
+    if req.genres and len(req.genres) > 5:
+        raise HTTPException(status_code=400, detail="Cannot select more than 5 genres")
+    n = req.n if req.n is not None else 6
+    if n < 1 or n > 50:
+        raise HTTPException(status_code=400, detail="n must be between 1 and 50")
+    return agent.recommend_detailed(uid, genres=req.genres, n=n)
 
 @app.get("/api/recommend")
 def get_recommendations(user_id: str = "demo_user", n: int = 6):
+    if n < 1 or n > 50:
+        raise HTTPException(status_code=400, detail="n must be between 1 and 50")
     return agent.recommend_detailed(user_id, n=n)
 
 @app.get("/api/why-this")
 def get_why_this(movie_id: Any, user_id: str = "demo_user"):
     mid_str = str(movie_id)
-    if mid_str in global_recommender.id_to_idx:
+    if global_recommender and mid_str in global_recommender.id_to_idx:
         row = global_recommender.df.iloc[global_recommender.id_to_idx[mid_str]]
         genres = [g.strip() for g in row["genres"].split("|") if g.strip()]
         orig_names = list(row["origin_country_names"])
@@ -155,6 +170,13 @@ def get_global_recommend(
             status_code=503,
             detail="World catalog not built. Run python scripts/build_catalog.py"
         )
+    if year_min is not None and year_max is not None and year_min > year_max:
+        raise HTTPException(status_code=400, detail="year_min cannot be greater than year_max")
+    if n < 1 or n > 50:
+        raise HTTPException(status_code=400, detail="n must be between 1 and 50")
+    genres = [g.strip() for g in genre.split(",") if g.strip()] if genre else None
+    if genres and len(genres) > 5:
+        raise HTTPException(status_code=400, detail="Cannot select more than 5 genres")
     fb = agent.memory.get_feedback(user_id)
     liked_ids = [str(m) for m in fb["liked"]]
     genres = [g.strip() for g in genre.split(",") if g.strip()] if genre else None
@@ -263,8 +285,11 @@ def get_eval():
 @app.post("/api/chat")
 def chat_endpoint(req: ChatRequest):
     uid = req.user_id or "demo_user"
-    if not req.message.strip():
+    msg = (req.message or "").strip()
+    if not msg:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
+    if len(msg) > 500:
+        raise HTTPException(status_code=400, detail="Message too long (max 500 characters)")
     t0 = time.perf_counter()
     reply = agent.chat(req.message, user_id=uid)
     dur_ms = round((time.perf_counter() - t0) * 1000, 2)
