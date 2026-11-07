@@ -36,12 +36,8 @@ class GlobalContentRecommender:
         feature_texts = []
         for _, r in self.df.iterrows():
             genres = " ".join([f"g_{g.strip().lower()}" for g in r["genres"].split("|") if g.strip()])
-            langs = " ".join(
-                [f"l_{str(l).strip().lower()}" for l in r["original_languages"] if str(l).strip() and l != "Unknown"]
-            )
-            countries = " ".join(
-                [f"c_{str(c).strip().lower()}" for c in r["origin_countries"] if str(c).strip() and c != "Unknown"]
-            )
+            langs = " ".join([f"l_{str(l).strip().lower()}" for l in r["original_languages"] if str(l).strip()])
+            countries = " ".join([f"c_{str(c).strip().lower()}" for c in r["origin_countries"] if str(c).strip()])
             tokens = f"{genres} {langs} {countries}".strip()
             feature_texts.append(tokens if tokens else "empty")
 
@@ -64,12 +60,12 @@ class GlobalContentRecommender:
         region_names: Dict[str, str] = {}
         for _, row in self.df.iterrows():
             cs = row["origin_countries"]
-            clbls = row["country_labels"]
+            clbls = row["origin_country_names"]
             for c, lbl in zip(cs, clbls):
-                if c and c != "Unknown":
+                if c:
                     code = str(c).upper()
                     region_counts[code] += 1
-                    if lbl and lbl != "Unknown":
+                    if lbl:
                         region_names[code] = str(lbl)
 
         self.available_regions = [
@@ -81,12 +77,12 @@ class GlobalContentRecommender:
         lang_names: Dict[str, str] = {}
         for _, row in self.df.iterrows():
             ls = row["original_languages"]
-            llbls = row["language_labels"]
+            llbls = row["original_language_names"]
             for l, lbl in zip(ls, llbls):
-                if l and l != "Unknown":
+                if l:
                     code = str(l).lower()
                     lang_counts[code] += 1
-                    if lbl and lbl != "Unknown":
+                    if lbl:
                         lang_names[code] = str(lbl)
 
         self.available_languages = [
@@ -162,18 +158,18 @@ class GlobalContentRecommender:
         if year_max is not None:
             mask &= (self.df["year"] <= year_max)
 
-        # Region filter: requested country in origin_countries (case-insensitive); exclude Unknown
+        # Region filter: requested country matches ANY element of origin_countries; exclude empty
         if region:
             reg_clean = region.strip().upper()
             mask &= self.df["origin_countries"].apply(
-                lambda cs: bool(cs) and any(str(c).upper() == reg_clean for c in cs if c != "Unknown")
+                lambda cs: bool(len(cs) > 0) and any(str(c).upper() == reg_clean for c in cs)
             )
 
-        # Language filter: requested language in original_languages (case-insensitive); exclude Unknown
+        # Language filter: requested language matches ANY element of original_languages; exclude empty
         if language:
             lang_clean = language.strip().lower()
             mask &= self.df["original_languages"].apply(
-                lambda ls: bool(ls) and any(str(l).lower() == lang_clean for l in ls if l != "Unknown")
+                lambda ls: bool(len(ls) > 0) and any(str(l).lower() == lang_clean for l in ls)
             )
 
         if genres:
@@ -193,9 +189,6 @@ class GlobalContentRecommender:
         # 2. Score computation: Cosine similarity + Bayesian prior
         profile_vec = self.get_user_profile_vector(
             liked_ids=liked_ids,
-            preferred_genres=genres,
-            preferred_region=region,
-            preferred_language=language,
         )
 
         cand_priors = self.prior[cand_indices]
@@ -235,24 +228,25 @@ class GlobalContentRecommender:
             raw_s = score_lookup.get(mid, 0.5)
             pct = int(np.clip(70 + 29 * (raw_s - min_s) / (max_s - min_s + 1e-8), 70, 99))
             genre_list = [g.strip() for g in row["genres"].split("|") if g.strip()]
-            origin_str = ", ".join(row["origin_countries"]) if len(row["origin_countries"]) > 0 else "unknown"
-            country_name_str = ", ".join(row["country_labels"]) if len(row["country_labels"]) > 0 else origin_str
+            origin_names = list(row["origin_country_names"])
+            lang_names = list(row["original_language_names"])
+            origin_str = ", ".join(origin_names) if len(origin_names) > 0 else "unknown"
+            language_str = ", ".join(lang_names) if len(lang_names) > 0 else ""
 
             results.append({
                 "movie_id": str(row["id"]),
+                "imdb_id": str(row["imdb_id"]),
                 "title": str(row["title"]),
                 "year": int(row["year"]),
                 "genres": genre_list,
                 "rating": float(row["rating"]),
                 "votes": int(row["votes"]),
                 "origin_countries": list(row["origin_countries"]),
+                "origin_country_names": origin_names,
                 "original_languages": list(row["original_languages"]),
-                "origin_primary": str(row["origin_primary"]),
-                "language_primary": str(row["language_primary"]),
-                "country_labels": list(row["country_labels"]),
-                "language_labels": list(row["language_labels"]),
+                "original_language_names": lang_names,
                 "origin": origin_str,
-                "country_name": country_name_str,
+                "language_names_str": language_str,
                 "match_pct": pct,
                 "explanation": f"Rating {row['rating']}/10 ({row['votes']:,} votes) • Origin: {origin_str} • {', '.join(genre_list[:2])}",
                 "trace": [

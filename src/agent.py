@@ -52,11 +52,32 @@ class MovieMindAgent:
         global_path = artifacts_dir / "global_catalog.parquet"
         self.global_meta = {}
         self.global_df = None
+        self.region_name_to_code = {}
+        self.lang_name_to_code = {}
         if global_path.exists():
             self.global_df = pd.read_parquet(global_path)
             self.global_meta = self.global_df.set_index("id").to_dict(orient="index")
             self.data_min_year = min(self.ml_min_year, int(self.global_df["year"].min()))
             self.data_max_year = max(self.ml_max_year, int(self.global_df["year"].max()))
+            for _, row in self.global_df.iterrows():
+                for c, lbl in zip(row.get("origin_countries", []), row.get("origin_country_names", [])):
+                    if c:
+                        code = str(c).upper()
+                        self.region_name_to_code[code.lower()] = code
+                        if lbl:
+                            self.region_name_to_code[str(lbl).lower()] = code
+                for c in row.get("origin_countries", []):
+                    if c:
+                        code = str(c).upper()
+                        for lang_lbl in row.get("original_language_names", []):
+                            if lang_lbl:
+                                self.region_name_to_code[str(lang_lbl).lower()] = code
+                for l, lbl in zip(row.get("original_languages", []), row.get("original_language_names", [])):
+                    if l:
+                        code = str(l).lower()
+                        self.lang_name_to_code[code] = code
+                        if lbl:
+                            self.lang_name_to_code[str(lbl).lower()] = code
         else:
             self.data_min_year = self.ml_min_year
             self.data_max_year = self.ml_max_year
@@ -601,8 +622,8 @@ class MovieMindAgent:
         # Query global catalog if region or language specified and catalog is available
         if (region or language) and self.global_df is not None:
             results = []
-            reg_clean = region.strip().upper() if region else None
-            lang_clean = language.strip().lower() if language else None
+            reg_clean = self.region_name_to_code.get(region.strip().lower(), region.strip().upper()) if region else None
+            lang_clean = self.lang_name_to_code.get(language.strip().lower(), language.strip().lower()) if language else None
             genre_clean = genre.strip().lower() if genre else None
 
             for _, row in self.global_df.iterrows():
@@ -610,22 +631,29 @@ class MovieMindAgent:
                     continue
                 if max_year and row["year"] > max_year:
                     continue
-                if reg_clean and row["approx_origin_region"].upper() != reg_clean:
+                row_countries = [str(c).upper() for c in row["origin_countries"]]
+                if reg_clean and (len(row_countries) == 0 or reg_clean not in row_countries):
                     continue
-                if lang_clean and lang_clean not in [l.strip().lower() for l in row["languages"].split(",") if l.strip()]:
+                row_langs = [str(l).lower() for l in row["original_languages"]]
+                if lang_clean and (len(row_langs) == 0 or lang_clean not in row_langs):
                     continue
                 if genre_clean and genre_clean not in row["genres"].lower():
                     continue
 
                 genre_list = [g.strip() for g in row["genres"].split("|") if g.strip()]
-                lang_list = [l.strip() for l in row["languages"].split(",") if l.strip()]
+                origin_names = list(row["origin_country_names"])
+                lang_names = list(row["original_language_names"])
+                origin_str = ", ".join(origin_names) if len(origin_names) > 0 else "unknown"
                 results.append({
                     "movie_id": str(row["id"]),
                     "title": clean_title(row["title"]),
                     "genres": genre_list,
                     "year": int(row["year"]),
-                    "approx_origin_region": str(row["approx_origin_region"]),
-                    "languages": lang_list,
+                    "origin_countries": list(row["origin_countries"]),
+                    "origin_country_names": origin_names,
+                    "original_languages": list(row["original_languages"]),
+                    "original_language_names": lang_names,
+                    "origin": origin_str,
                 })
                 if len(results) >= limit:
                     break
@@ -660,12 +688,19 @@ class MovieMindAgent:
                 if genre_clean and genre_clean not in row["genres"].lower():
                     continue
                 genre_list = [g.strip() for g in row["genres"].split("|") if g.strip()]
+                origin_names = list(row["origin_country_names"])
+                lang_names = list(row["original_language_names"])
+                origin_str = ", ".join(origin_names) if len(origin_names) > 0 else "unknown"
                 results.append({
                     "movie_id": str(row["id"]),
                     "title": clean_title(row["title"]),
                     "genres": genre_list,
                     "year": int(row["year"]),
-                    "approx_origin_region": str(row["approx_origin_region"]),
+                    "origin_countries": list(row["origin_countries"]),
+                    "origin_country_names": origin_names,
+                    "original_languages": list(row["original_languages"]),
+                    "original_language_names": lang_names,
+                    "origin": origin_str,
                 })
                 if len(results) >= limit:
                     break
@@ -751,7 +786,7 @@ class MovieMindAgent:
                 "type": "function",
                 "function": {
                     "name": "filter_movies",
-                    "description": f"Filter movies by genre, release year ({self.data_min_year} to {self.data_max_year}), approximate origin region code, or language.",
+                    "description": f"Filter movies by genre, release year ({self.data_min_year} to {self.data_max_year}), origin country code or name, or language.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -759,8 +794,8 @@ class MovieMindAgent:
                             "year": {"type": "integer", "description": f"Exact release year ({self.data_min_year} to {self.data_max_year})"},
                             "min_year": {"type": "integer", "description": f"Minimum release year (>= {self.data_min_year})"},
                             "max_year": {"type": "integer", "description": f"Maximum release year (<= {self.data_max_year})"},
-                            "region": {"type": "string", "description": "Country or origin region code (e.g. FR, JP, IN, IT, GB, US)"},
-                            "language": {"type": "string", "description": "Language code or name (e.g. French, Japanese, Hindi, Spanish)"},
+                            "region": {"type": "string", "description": "Country code or country name (e.g. FR, JP, IN, IT, GB, US, India, Japan)"},
+                            "language": {"type": "string", "description": "Language code or name (e.g. French, Japanese, Hindi, Spanish, te, ja)"},
                             "limit": {"type": "integer", "default": 5},
                         },
                     },
@@ -969,23 +1004,18 @@ class MovieMindAgent:
                     matched_genre = syn_v
                     break
 
-        region_keywords = {
-            "french": "FR", "france": "FR",
-            "japanese": "JP", "japan": "JP",
-            "indian": "IN", "india": "IN",
-            "italian": "IT", "italy": "IT",
-            "german": "DE", "germany": "DE",
-            "spanish": "ES", "spain": "ES",
-            "korean": "KR", "korea": "KR",
-            "british": "GB", "britain": "GB",
-            "mexican": "MX", "mexico": "MX",
-            "brazilian": "BR", "brazil": "BR",
-        }
         matched_region = None
         matched_language = None
-        for rk, rcode in region_keywords.items():
-            if re.search(rf"\b{rk}\b", low):
-                matched_region = rcode
+
+        # Data-driven region and language matching from catalog labels
+        for name_key in sorted(self.region_name_to_code.keys(), key=len, reverse=True):
+            if len(name_key) >= 3 and re.search(rf"\b{re.escape(name_key)}\b", low):
+                matched_region = self.region_name_to_code[name_key]
+                break
+
+        for name_key in sorted(self.lang_name_to_code.keys(), key=len, reverse=True):
+            if len(name_key) >= 3 and re.search(rf"\b{re.escape(name_key)}\b", low):
+                matched_language = self.lang_name_to_code[name_key]
                 break
         
         reg_code_match = re.search(r"\bregion\s+([a-zA-Z]{2})\b", low)
@@ -994,7 +1024,8 @@ class MovieMindAgent:
 
         lang_code_match = re.search(r"\blanguage\s+([a-zA-Z]{2,10})\b", low)
         if lang_code_match:
-            matched_language = lang_code_match.group(1).lower()
+            code_candidate = lang_code_match.group(1).lower()
+            matched_language = self.lang_name_to_code.get(code_candidate, code_candidate)
 
         is_filter_trigger = (
             "filter" in low
@@ -1035,7 +1066,7 @@ class MovieMindAgent:
             )
             lines = []
             for r in results:
-                reg_s = f" [{r['approx_origin_region']}]" if 'approx_origin_region' in r else ""
+                reg_s = f" [{r['origin']}]" if 'origin' in r else ""
                 lines.append(f"- **{r['title']}** ({r['year']}){reg_s} - [{', '.join(r['genres'])}]")
 
             tool_args = {"genre": matched_genre, "min_year": min_y, "max_year": max_y, "limit": 5}
@@ -1194,6 +1225,31 @@ class MovieMindAgent:
             # Ensure user_id defaults if expected
             if fn_name in ("recommend", "get_taste_profile", "record_feedback", "explain"):
                 fn_args.setdefault("user_id", user_id)
+
+            canonical_genres = {
+                "action": "Action", "adventure": "Adventure", "animated": "Animation",
+                "animation": "Animation", "children": "Children's", "children's": "Children's",
+                "comedy": "Comedy", "crime": "Crime", "documentary": "Documentary",
+                "drama": "Drama", "fantasy": "Fantasy", "film-noir": "Film-Noir",
+                "noir": "Film-Noir", "horror": "Horror", "musical": "Musical",
+                "mystery": "Mystery", "romance": "Romance", "romantic": "Romance",
+                "sci-fi": "Sci-Fi", "scifi": "Sci-Fi", "thriller": "Thriller",
+                "war": "War", "western": "Western"
+            }
+
+            if fn_name == "recommend":
+                if "genres" in fn_args and isinstance(fn_args["genres"], list):
+                    fn_args["genres"] = [
+                        canonical_genres.get(g.strip().lower(), g.strip().capitalize())
+                        for g in fn_args["genres"] if g
+                    ]
+
+            if fn_name == "filter_movies":
+                if "year" in fn_args and fn_args["year"] is not None:
+                    fn_args.setdefault("min_year", fn_args["year"])
+                    fn_args.setdefault("max_year", fn_args["year"])
+                if "genre" in fn_args and isinstance(fn_args["genre"], str):
+                    fn_args["genre"] = canonical_genres.get(fn_args["genre"].strip().lower(), fn_args["genre"])
 
             if fn_name in ("explain", "record_feedback"):
                 if "movie_id" not in fn_args or fn_args["movie_id"] is None:

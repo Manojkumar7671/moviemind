@@ -104,9 +104,11 @@ def get_why_this(movie_id: Any, user_id: str = "demo_user"):
     if mid_str in global_recommender.id_to_idx:
         row = global_recommender.df.iloc[global_recommender.id_to_idx[mid_str]]
         genres = [g.strip() for g in row["genres"].split("|") if g.strip()]
+        orig_names = list(row["origin_country_names"])
+        orig_str = ", ".join(orig_names) if len(orig_names) > 0 else "international"
         return {
             "movie_id": mid_str,
-            "text": f"{row['title']} ({row['year']}) is an acclaimed {row['approx_origin_region']} feature with {row['rating']}/10 across {row['votes']:,} IMDb ratings, matching your interest in {', '.join(genres[:2])}.",
+            "text": f"{row['title']} ({row['year']}) is an acclaimed {orig_str} feature with {row['rating']}/10 across {row['votes']:,} IMDb ratings, matching your interest in {', '.join(genres[:2])}.",
             "matched_genres": genres[:2],
             "similar_liked_movies": [],
             "cached": True,
