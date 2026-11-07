@@ -271,3 +271,19 @@ def test_global_content_eval_metrics():
     assert "world_cinema_eval" in eval_json
     assert eval_json["world_cinema_eval"] is not None
     assert "honesty_disclaimer" in eval_json["world_cinema_eval"]
+
+
+def test_global_catalog_missing_fallback(monkeypatch):
+    import app.main as main_mod
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(main_mod, "global_recommender", None)
+    client = TestClient(main_mod.app)
+
+    res_meta = client.get("/api/global/meta")
+    assert res_meta.status_code == 503
+    assert "World catalog not built" in res_meta.json()["detail"]
+
+    res_rec = client.get("/api/global/recommend")
+    assert res_rec.status_code == 503
+    assert "World catalog not built" in res_rec.json()["detail"]

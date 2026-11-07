@@ -38,7 +38,15 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 agent = MovieMindAgent()
 coldstart = ColdStartRecommender()
 taste_map_service = TasteMapService()
-global_recommender = GlobalContentRecommender()
+
+global_recommender: Optional[GlobalContentRecommender] = None
+global_catalog_file = ARTIFACTS_DIR / "global_catalog.parquet"
+if global_catalog_file.exists():
+    try:
+        global_recommender = GlobalContentRecommender(global_catalog_file)
+    except Exception as e:
+        print(f"Warning: could not initialize global recommender: {e}")
+        global_recommender = None
 
 class ChatRequest(BaseModel):
     message: str
@@ -118,6 +126,11 @@ def get_why_this(movie_id: Any, user_id: str = "demo_user"):
 
 @app.get("/api/global/meta")
 def get_global_meta():
+    if global_recommender is None:
+        raise HTTPException(
+            status_code=503,
+            detail="World catalog not built. Run python scripts/build_catalog.py"
+        )
     return {
         "year_min": global_recommender.min_year,
         "year_max": global_recommender.max_year,
@@ -137,6 +150,11 @@ def get_global_recommend(
     n: int = 12,
     lmbda: float = 0.7,
 ):
+    if global_recommender is None:
+        raise HTTPException(
+            status_code=503,
+            detail="World catalog not built. Run python scripts/build_catalog.py"
+        )
     fb = agent.memory.get_feedback(user_id)
     liked_ids = [str(m) for m in fb["liked"]]
     genres = [g.strip() for g in genre.split(",") if g.strip()] if genre else None

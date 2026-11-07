@@ -11,6 +11,7 @@ from __future__ import annotations
 import gzip
 import json
 import logging
+import os
 import sys
 import urllib.request
 from pathlib import Path
@@ -31,6 +32,7 @@ FILES = ["title.ratings.tsv.gz", "title.basics.tsv.gz"]
 ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "artifacts"
 CACHE_PATH = ARTIFACTS_DIR / "wikidata_cache.json"
 DEFAULT_OUTPUT_PATH = ARTIFACTS_DIR / "global_catalog.parquet"
+DEFAULT_MIN_VOTES = int(os.environ.get("MIN_VOTES", 2000))
 
 
 def download_file(filename: str, dest_dir: Path) -> Path:
@@ -59,7 +61,7 @@ def download_file(filename: str, dest_dir: Path) -> Path:
 def build_catalog(
     tmp_dir: Path = Path("/tmp"),
     output_path: Path = DEFAULT_OUTPUT_PATH,
-    min_votes: int = 2000,
+    min_votes: int = DEFAULT_MIN_VOTES,
 ) -> Path:
     # 1. Download or locate IMDb source files
     ratings_path = download_file("title.ratings.tsv.gz", tmp_dir)
@@ -161,4 +163,4 @@ def build_catalog(
 
 
 if __name__ == "__main__":
-    build_catalog()
+    build_catalog(min_votes=DEFAULT_MIN_VOTES)
