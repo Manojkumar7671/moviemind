@@ -390,15 +390,24 @@ function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false, t
     const mmrMs = (latency?.mmr ?? 0.2).toFixed(2);
     const totMs = (latency?.total ?? (parseFloat(retMs) + parseFloat(rkMs) + parseFloat(mmrMs))).toFixed(2);
 
-    const originNames = (movie.origin_country_names && movie.origin_country_names.length > 0)
-      ? movie.origin_country_names.join(', ')
-      : (movie.origin || 'unknown');
-    const langNames = (movie.original_language_names && movie.original_language_names.length > 0)
-      ? movie.original_language_names.join(', ')
-      : (movie.language_names_str || '');
+    const isWorldCinema = (targetGridId === 'worldMovieGrid');
 
-    const originBadge = `<span class="card-origin-region-label" title="${originNames}">Origin: ${originNames}</span>`;
-    const langChipHtml = langNames ? `<span class="genre-tag language-tag" title="Original language">${langNames}</span>` : '';
+    let originBadge = '';
+    let langChipHtml = '';
+
+    if (isWorldCinema) {
+      const originNames = (movie.origin_country_names && movie.origin_country_names.length > 0)
+        ? movie.origin_country_names.join(', ')
+        : (movie.origin || 'unknown');
+      const langNames = (movie.original_language_names && movie.original_language_names.length > 0)
+        ? movie.original_language_names.join(', ')
+        : (movie.language_names_str || '');
+
+      originBadge = ` • <span class="card-origin-region-label" title="${originNames}">Origin: ${originNames}</span>`;
+      if (langNames) {
+        langChipHtml = `<span class="genre-tag language-tag" title="Original language">${langNames}</span>`;
+      }
+    }
 
     let traceStepsHtml = '';
     if (trace && trace.length > 0) {
@@ -426,8 +435,8 @@ function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false, t
         ${generatePosterSvg(movie.title, movie.year, primaryGenre, movie.movie_id)}
         <div class="poster-content">
           <div class="poster-header">
-            <span class="poster-year">${movie.year} • ${originBadge}</span>
-            <span class="poster-match-badge">${movie.match_pct}% Relative match</span>
+            <span class="poster-year">${movie.year}${originBadge}</span>
+            <span class="poster-match-badge" title="Relative to this list">${movie.match_pct}% match</span>
           </div>
           <div class="poster-title-area">
             <h3 class="poster-title">${movie.title}</h3>
