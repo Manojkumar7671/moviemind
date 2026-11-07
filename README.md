@@ -31,10 +31,14 @@ MovieMind provides two complementary recommendation modes tailored for different
    - **Evaluation**: Leave-one-out time-based offline test set ($N=6,040$, zero leakage) and position-biased simulated A/B testing (+11.18% CTR lift, $p=0.0002$).
 
 2. **World Cinema Explorer (Content-Based Filtering)**:
-   - **Catalog**: 33,400+ international feature films from IMDb non-commercial datasets (`titleType=movie`, `numVotes >= 2000`, valid release year).
-   - **Architecture**: Content TF-IDF vectorization over genres, spoken languages, and approximate country/region of origin $\to$ Bayesian rating/vote quality priors $\to$ cosine profile similarity $\to$ MMR diversity re-ranking ($\lambda=0.7$).
-   - **Features**: Dynamically shifts taste profiles as the user likes movies; rich multi-dimensional filtering by approximate origin region (e.g. FR, JP, IN, IT, GB, US), language, genre, and data-driven release year ranges.
-   - **Evaluation**: Honest leave-one-out content similarity ($N=500$ probes, 91.2% Hit@10, 95.8% Hit@20, +6.16% ILD improvement).
+   - **Catalog**: 33,485 international feature films from IMDb non-commercial datasets (`titleType=movie`, `numVotes >= 2000`, valid release year) with authentic country of origin and original language metadata from Wikidata (CC0).
+   - **All-Countries Rule**: Co-productions store all origin countries and languages as complete lists (no primary country/language column; e.g. *The Godfather* lists both Italy and United States). Films without Wikidata data are honestly labeled "unknown".
+   - **Measured Coverage**: **97.57%** country coverage (32,670 films), **93.21%** original language coverage (31,211 films), and an honest unknown origin share of **2.43%** (815 films).
+   - **Architecture**: Content TF-IDF vectorization over verified genres, original languages, and origin countries $\to$ Bayesian rating/vote quality priors $\to$ cosine profile similarity $\to$ MMR diversity re-ranking ($\lambda=0.7$).
+   - **Features**: Dynamically shifts taste profiles as the user likes movies; rich multi-dimensional filtering by country name/code (e.g. FR, JP, IN, IT, GB, US, India, Japan), language, genre, and data-driven release year ranges.
+   - **Evaluation**: Honest content target recovery benchmark ($N=500$ targets, seed 42) yielding **5.20% Hit@20** (26 hits), achieving a **+5.20% lift over Random Ranking (0.00%)** and **+5.20% lift over Popularity Ranking (0.00%)**.
+   - **Honest Limitations**: Attribute-conditioned retrieval sanity check; not evidence of personalization quality. No collaborative filtering claims are made because IMDb non-commercial datasets lack individual user interaction logs.
+   - **Attribution**: Origin and language data: Wikidata (CC0). Titles and ratings: IMDb non-commercial datasets (https://www.imdb.com/interfaces/).
 
 ---
 
