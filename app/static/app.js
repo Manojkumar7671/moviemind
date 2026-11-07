@@ -345,22 +345,39 @@ function updateFallbackNotice(isFallback, noticeText) {
   }
 }
 
+function showGridError(targetGridId, retryFnName, message = "Failed to load recommendations.") {
+  const grid = document.getElementById(targetGridId);
+  if (!grid) return;
+  grid.innerHTML = `
+    <div class="grid-error-state" style="grid-column: 1 / -1; padding: 48px 24px; text-align: center;">
+      <p style="color: var(--muted); font-size: 14px; margin-bottom: 16px;">${message}</p>
+      <button class="btn-secondary" onclick="${retryFnName}()">Retry</button>
+    </div>
+  `;
+}
+
 // Recommendations
 async function loadRecommendations() {
   const grid = document.getElementById('movieGrid');
-  grid.innerHTML = '<div class="skeleton" style="height: 380px;"></div>'.repeat(6);
+  if (grid) {
+    grid.innerHTML = '<div class="skeleton" style="height: 380px; border-radius: var(--radius-md); background: rgba(255,255,255,0.04); animation: pulse 1.5s infinite;"></div>'.repeat(6);
+  }
   try {
     const res = await fetch('/api/recommend', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: state.userId, genres: Array.from(state.selectedGenres), n: 6 })
     });
+    if (!res.ok) {
+      showGridError('movieGrid', 'loadRecommendations');
+      return;
+    }
     const data = await res.json();
     state.movies = data.recommendations || [];
     updateFallbackNotice(data.llm_fallback, data.notice);
     renderMovieGrid(state.movies, data.trace, data.latency_ms, data.llm_fallback);
   } catch (err) {
-    grid.innerHTML = `<div class="meta-chip">Failed to load recommendations: ${err}</div>`;
+    showGridError('movieGrid', 'loadRecommendations', `Failed to load recommendations: ${err}`);
   }
 }
 
@@ -370,7 +387,11 @@ function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false, t
   grid.innerHTML = '';
 
   if (!movies || movies.length === 0) {
-    grid.innerHTML = `<div style="padding: 32px; color: var(--muted);">No movies found matching current criteria.</div>`;
+    if (targetGridId === 'worldMovieGrid') {
+      grid.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1; padding: 48px 24px; text-align: center; color: var(--muted); font-size: 14px;">No films match. Widen the years or remove a filter.</div>`;
+    } else {
+      grid.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1; padding: 32px; text-align: center; color: var(--muted);">No movies found matching current criteria.</div>`;
+    }
     return;
   }
 
@@ -538,11 +559,25 @@ async function loadWorldMeta() {
 }
 
 async function loadWorldRecommendations() {
+  const grid = document.getElementById('worldMovieGrid');
+  if (grid) {
+    grid.innerHTML = '<div class="skeleton" style="height: 380px; border-radius: var(--radius-md); background: rgba(255,255,255,0.04); animation: pulse 1.5s infinite;"></div>'.repeat(6);
+  }
+
   const reg = document.getElementById('worldRegionSelect')?.value || '';
   const lang = document.getElementById('worldLanguageSelect')?.value || '';
   const genre = document.getElementById('worldGenreSelect')?.value || '';
   const yMin = document.getElementById('worldYearMin')?.value || '';
   const yMax = document.getElementById('worldYearMax')?.value || '';
+
+  // Preserve sticky filter state across re-renders
+  state.worldFilters = {
+    region: reg,
+    language: lang,
+    genre: genre,
+    year_min: yMin,
+    year_max: yMax,
+  };
 
   const params = new URLSearchParams({
     user_id: state.userId,
@@ -556,11 +591,17 @@ async function loadWorldRecommendations() {
 
   try {
     const res = await fetch(`/api/global/recommend?${params.toString()}`);
-    if (!res.ok) return;
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      const msg = errData.detail || "Failed to load world recommendations.";
+      showGridError('worldMovieGrid', 'loadWorldRecommendations', msg);
+      return;
+    }
     const data = await res.json();
     renderMovieGrid(data.recommendations, [], { total: data.total_ms }, false, 'worldMovieGrid');
   } catch (err) {
     console.error("Failed to load world recommendations:", err);
+    showGridError('worldMovieGrid', 'loadWorldRecommendations', "Network connection error.");
   }
 }
 

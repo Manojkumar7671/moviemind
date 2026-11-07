@@ -72,6 +72,12 @@
         <span id="llmFallbackNoticeText">Fallback active: using deterministic data chips.</span>
       </div>
 
+      <!-- Discover MMR Diversification Caption -->
+      <div class="mmr-notice-bar" style="display:flex; align-items:center; gap:8px; margin-bottom:14px; font-size:12px; color:var(--muted);" title="Maximal Marginal Relevance (λ=0.7) balances relevance and diversity to prevent redundant recommendations.">
+        <span style="font-size:13px;">🔀</span>
+        <span>Order is diversified (MMR), so match % is not strictly descending.</span>
+      </div>
+
       <!-- Movie Grid -->
       <div class="movie-grid" id="movieGrid">
         <!-- Rendered by JS -->
@@ -128,7 +134,9 @@
       <div class="movie-grid" id="worldMovieGrid">
         <!-- Rendered by JS -->
       </div>
-      <p class="world-footnote" style="margin-top:20px; font-size:12px; color:var(--muted); text-align:center;">Origin and language data from Wikidata (CC0). Films can list several countries. Films without data are labelled unknown.</p>
+      <div class="world-footnote-box" style="margin-top:24px; padding:12px 16px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:var(--radius-sm); font-size:12px; color:var(--muted); line-height:1.5;">
+        <strong>Data & Licensing Footnote</strong>: Country-of-origin and language metadata are sourced from <strong>Wikidata (CC0)</strong>. Because international co-productions often originate across multiple nations, films list all verified origin countries. Films without verified Wikidata records are honestly designated as <em>unknown</em>. Movie catalog subset derived from IMDb non-commercial datasets.
+      </div>
     </section>
 
     <!-- Tab 2: Taste Map -->

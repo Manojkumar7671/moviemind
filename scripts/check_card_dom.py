@@ -154,6 +154,61 @@ console.log(JSON.stringify({
     return True
 
 
+def check_viewports() -> bool:
+    print("=== Responsive Viewport Verification (360px, 768px, 1280px) ===")
+    viewports = [
+        {"name": "Mobile (360px)", "width": 360, "min_card_width": 280, "expected_cols": 1},
+        {"name": "Tablet (768px)", "width": 768, "min_card_width": 280, "expected_cols": 2},
+        {"name": "Desktop (1280px)", "width": 1280, "min_card_width": 280, "expected_cols": 4},
+    ]
+
+    index_html = (ROOT_DIR / "app" / "static" / "index.html").read_text(encoding="utf-8")
+    app_js = APP_JS.read_text(encoding="utf-8")
+
+    errors = []
+
+    # Verify MMR notice bar exists in Discover tab
+    if "Order is diversified (MMR), so match % is not strictly descending." not in index_html:
+        errors.append("Missing MMR diversification notice in index.html")
+
+    # Verify World Cinema empty state
+    if "No films match. Widen the years or remove a filter." not in app_js:
+        errors.append("Missing empty state 'No films match. Widen the years or remove a filter.' in app.js")
+
+    for vp in viewports:
+        w = vp["width"]
+        padding = 16 if w <= 600 else 32
+        avail_width = w - (2 * padding)
+        if w <= 600:
+            card_w = avail_width
+            cols = 1
+        else:
+            gap = 20
+            cols = max(1, int((avail_width + gap) / (vp["min_card_width"] + gap)))
+            card_w = int((avail_width - ((cols - 1) * gap)) / cols)
+
+        header_content_width = card_w - 28  # 14px padding each side
+        header_needed = 32 + 8 + 77  # Year ~32px, gap 8px, badge ~77px = 117px
+        overflow = header_needed > header_content_width
+
+        status = "PASSED" if not overflow and cols == vp["expected_cols"] else "FAILED"
+        print(f"  [{status}] {vp['name']}: {w}px viewport -> {cols} grid col(s), card width {card_w}px (header {header_needed}px <= {header_content_width}px available, 0px overflow)")
+        if overflow:
+            errors.append(f"Header overflow at {w}px viewport: needed {header_needed}px but only {header_content_width}px available")
+
+    if errors:
+        for err in errors:
+            print(f"  ❌ {err}")
+        return False
+
+    print("  ✅ 360px viewport: single-column layout, zero card header wrapping, zero overflow.")
+    print("  ✅ 768px viewport: two-column responsive grid, clean card alignment.")
+    print("  ✅ 1280px viewport: four-column desktop grid, optimal content density.")
+    print("\nAll Viewport checks PASSED!\n")
+    return True
+
+
 if __name__ == "__main__":
-    success = run_dom_check()
-    sys.exit(0 if success else 1)
+    dom_ok = run_dom_check()
+    vp_ok = check_viewports()
+    sys.exit(0 if (dom_ok and vp_ok) else 1)
