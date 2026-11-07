@@ -1,20 +1,33 @@
-"""Honest Content-Based Evaluation on the World Cinema (IMDb) Catalog.
+"""Honest Content-Based Evaluation on the World Cinema Catalog.
 
-Evaluates leave-one-out content similarity on liked items:
-- Hit Rate@10 and Hit Rate@20 on held-out similar neighbor
-- Mean Cosine Similarity to held-out favorite
-- Intra-List Diversity (ILD@10) with vs without MMR
-- Catalog Coverage and Origin Region alignment
+Protocol:
+- N = 500 random target films T with fixed seed 42.
+- For each target T, sample two other films A and B that share at least one genre AND at least one original language with T.
+- Build the profile vector from A and B only.
+- Rank the entire catalog excluding A and B.
+- A hit is counted if T is in the top 20 recommendations.
+- Evaluates:
+    (a) Recommender (TF-IDF + prior + MMR lambda=0.7)
+    (b) Random ranking baseline
+    (c) Popularity ranking baseline (most votes)
+- Reports Hit@20 for all three and the lift over both baselines.
 
-DISCLAIMER: Evaluated strictly via content-based item similarity.
-Because the IMDb non-commercial dataset does not contain individual user interaction
-histories, NO collaborative filtering performance (collaborative Recall/NDCG) is claimed.
+Limitations:
+Targets share attributes with the liked films by construction, so this is a content-similarity
+sanity check and retrieval benchmark, not evidence of personalization quality.
+No collaborative filtering metrics (e.g. collaborative Recall/NDCG) apply because IMDb
+non-commercial datasets contain no user rating logs.
 """
 
+from __future__ import annotations
+
 import json
+import logging
 import sys
+from collections import defaultdict
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
+
 import numpy as np
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -23,168 +36,184 @@ if str(ROOT_DIR) not in sys.path:
 
 from src.global_recommender import GlobalContentRecommender
 
-ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "artifacts"
-DOCS_DIR = Path(__file__).resolve().parent.parent / "docs"
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("global_eval")
+
+ARTIFACTS_DIR = ROOT_DIR / "artifacts"
+DOCS_DIR = ROOT_DIR / "docs"
+
 
 def run_global_evaluation(
     n_samples: int = 500,
     seed: int = 42,
     artifacts_dir: Path = ARTIFACTS_DIR,
+    docs_dir: Path = DOCS_DIR,
 ) -> Dict[str, Any]:
-    rec = GlobalContentRecommender(artifacts_dir / "global_catalog.parquet")
-    np.random.seed(seed)
+    catalog_path = artifacts_dir / "global_catalog.parquet"
+    rec = GlobalContentRecommender(catalog_path)
+    df = rec.df
+    n_items = len(df)
+    rng = np.random.RandomState(seed)
 
-    # 1. Sample evaluation probe items across catalog
-    sample_indices = np.random.choice(rec.n_items, size=min(n_samples, rec.n_items), replace=False)
+    logger.info(f"Running honest global evaluation (N={n_samples}, seed={seed}) over {n_items:,} catalog items...")
 
-    hits_10_no_mmr = 0
-    hits_10_mmr = 0
-    hits_20_mmr = 0
-    sims_10_no_mmr = []
-    sims_10_mmr = []
-    ild_no_mmr = []
-    ild_mmr = []
-    region_match_counts = []
-    genre_match_counts = []
+    # 1. Build inverted indexes for fast candidate pair discovery
+    genre_to_indices = defaultdict(set)
+    lang_to_indices = defaultdict(set)
 
-    unique_recs_no_mmr = set()
-    unique_recs_mmr = set()
+    for idx, row in df.iterrows():
+        for g in row["genres"].split("|"):
+            if g.strip():
+                genre_to_indices[g.strip().lower()].add(idx)
+        for l in row["original_languages"]:
+            if str(l).strip():
+                lang_to_indices[str(l).strip().lower()].add(idx)
 
-    for idx in sample_indices:
-        mid = rec.idx_to_id[idx]
-        probe_row = rec.df.iloc[idx]
-        probe_region = probe_row["approx_origin_region"]
-        probe_genres = set(g.strip().lower() for g in probe_row["genres"].split("|") if g.strip())
+    # 2. Precompute global popularity list (sorted by votes descending)
+    pop_sorted_ids = df.sort_values(by="votes", ascending=False)["id"].tolist()
+    all_ids = df["id"].tolist()
 
-        # Find closest content neighbor in TF-IDF space (held-out target item)
-        probe_vec = rec.tfidf_matrix[idx]
-        sim_scores = np.asarray(rec.tfidf_matrix.dot(probe_vec.T).todense()).flatten()
-        sim_scores[idx] = -1.0  # exclude self
-        top_neighbor_idx = int(np.argmax(sim_scores))
-        target_mid = rec.idx_to_id[top_neighbor_idx]
-        target_vec = rec.tfidf_matrix[top_neighbor_idx]
+    # 3. Find valid target candidates (must have >= 2 items sharing >= 1 genre and >= 1 language)
+    valid_targets = []
+    for idx in range(n_items):
+        row = df.iloc[idx]
+        gs = [g.strip().lower() for g in row["genres"].split("|") if g.strip()]
+        ls = [str(l).strip().lower() for l in row["original_languages"] if str(l).strip()]
+        if not gs or not ls:
+            continue
+        g_matches = set.union(*(genre_to_indices[g] for g in gs))
+        l_matches = set.union(*(lang_to_indices[l] for l in ls))
+        cands = (g_matches & l_matches) - {idx}
+        if len(cands) >= 2:
+            valid_targets.append(idx)
 
-        # A. Recommend without MMR (lambda = 1.0)
-        recs_no_mmr = rec.recommend(liked_ids=[mid], n=10, lmbda=1.0)
-        rec_ids_no_mmr = [r["movie_id"] for r in recs_no_mmr]
-        unique_recs_no_mmr.update(rec_ids_no_mmr)
-        if target_mid in rec_ids_no_mmr:
-            hits_10_no_mmr += 1
+    logger.info(f"Found {len(valid_targets):,} eligible target films with >=2 matching candidates.")
+    target_sample = rng.choice(valid_targets, size=min(n_samples, len(valid_targets)), replace=False)
+    actual_n = len(target_sample)
 
-        # Cosine similarity to target
-        if rec_ids_no_mmr:
-            r_indices = [rec.id_to_idx[r_id] for r_id in rec_ids_no_mmr if r_id in rec.id_to_idx]
-            sub_tfidf = rec.tfidf_matrix[r_indices]
-            s = float(np.mean(np.asarray(sub_tfidf.dot(target_vec.T).todense()).flatten()))
-            sims_10_no_mmr.append(s)
+    hits_rec = 0
+    hits_rand = 0
+    hits_pop = 0
 
-            # ILD for no MMR
-            if len(r_indices) > 1:
-                mat = sub_tfidf.dot(sub_tfidf.T).toarray()
-                n_items = len(r_indices)
-                upper = [mat[i, j] for i in range(n_items) for j in range(i + 1, n_items)]
-                ild_no_mmr.append(float(np.mean([1.0 - c for c in upper])))
+    # 4. Evaluation loop
+    for step, t_idx in enumerate(target_sample):
+        row = df.iloc[t_idx]
+        t_id = str(row["id"])
+        gs = [g.strip().lower() for g in row["genres"].split("|") if g.strip()]
+        ls = [str(l).strip().lower() for l in row["original_languages"] if str(l).strip()]
+        g_matches = set.union(*(genre_to_indices[g] for g in gs))
+        l_matches = set.union(*(lang_to_indices[l] for l in ls))
+        cands = sorted(list((g_matches & l_matches) - {t_idx}))
 
-        # B. Recommend with MMR (lambda = 0.7)
-        recs_mmr_20 = rec.recommend(liked_ids=[mid], n=20, lmbda=0.7)
-        recs_mmr_10 = recs_mmr_20[:10]
-        rec_ids_mmr_10 = [r["movie_id"] for r in recs_mmr_10]
-        rec_ids_mmr_20 = [r["movie_id"] for r in recs_mmr_20]
-        unique_recs_mmr.update(rec_ids_mmr_20)
+        # Sample two distinct condition films A and B
+        ab_indices = rng.choice(cands, size=2, replace=False)
+        a_id = rec.idx_to_id[ab_indices[0]]
+        b_id = rec.idx_to_id[ab_indices[1]]
+        liked_ids = [a_id, b_id]
 
-        if target_mid in rec_ids_mmr_10:
-            hits_10_mmr += 1
-        if target_mid in rec_ids_mmr_20:
-            hits_20_mmr += 1
+        # (a) Recommender ranking (excluding A and B)
+        recs = rec.recommend(liked_ids=liked_ids, n=20, lmbda=0.7)
+        rec_ids = [r["movie_id"] for r in recs]
+        if t_id in rec_ids:
+            hits_rec += 1
 
-        if rec_ids_mmr_10:
-            r_indices = [rec.id_to_idx[r_id] for r_id in rec_ids_mmr_10 if r_id in rec.id_to_idx]
-            sub_tfidf = rec.tfidf_matrix[r_indices]
-            s = float(np.mean(np.asarray(sub_tfidf.dot(target_vec.T).todense()).flatten()))
-            sims_10_mmr.append(s)
+        # (b) Random ranking baseline (sample 20 random items excluding A and B)
+        avail = [i for i in all_ids if i not in liked_ids]
+        rand_20 = rng.choice(avail, size=20, replace=False)
+        if t_id in rand_20:
+            hits_rand += 1
 
-            if len(r_indices) > 1:
-                mat = sub_tfidf.dot(sub_tfidf.T).toarray()
-                n_items = len(r_indices)
-                upper = [mat[i, j] for i in range(n_items) for j in range(i + 1, n_items)]
-                ild_mmr.append(float(np.mean([1.0 - c for c in upper])))
+        # (c) Popularity ranking baseline (top 20 most votes excluding A and B)
+        pop_20 = [pid for pid in pop_sorted_ids if pid not in liked_ids][:20]
+        if t_id in pop_20:
+            hits_pop += 1
 
-            # Regional and genre alignment
-            reg_matches = sum(1 for r in recs_mmr_10 if r["approx_origin_region"] == probe_region)
-            region_match_counts.append(reg_matches / len(recs_mmr_10))
-            genre_matches = sum(1 for r in recs_mmr_10 if bool(set(g.lower() for g in r["genres"]) & probe_genres))
-            genre_match_counts.append(genre_matches / len(recs_mmr_10))
+        if (step + 1) % 100 == 0 or (step + 1) == actual_n:
+            logger.info(f"Evaluated {step + 1}/{actual_n} targets. Hits: Rec={hits_rec}, Rand={hits_rand}, Pop={hits_pop}")
 
-    total = len(sample_indices)
+    rec_hit_rate = round(hits_rec / actual_n, 4)
+    rand_hit_rate = round(hits_rand / actual_n, 4)
+    pop_hit_rate = round(hits_pop / actual_n, 4)
+
+    lift_over_random = round(rec_hit_rate - rand_hit_rate, 4)
+    lift_over_popularity = round(rec_hit_rate - pop_hit_rate, 4)
+
     results = {
-        "catalog": "World Cinema (IMDb Datasets)",
-        "evaluation_type": "Leave-one-out Content Similarity",
+        "n_samples": actual_n,
+        "seed": seed,
+        "catalog_size": n_items,
+        "recommender_hit20": rec_hit_rate,
+        "recommender_hits": hits_rec,
+        "random_hit20": rand_hit_rate,
+        "random_hits": hits_rand,
+        "popularity_hit20": pop_hit_rate,
+        "popularity_hits": hits_pop,
+        "lift_over_random": lift_over_random,
+        "lift_over_popularity": lift_over_popularity,
         "honesty_disclaimer": (
-            "Evaluated strictly via content-based leave-one-out item similarity. "
-            "Because the IMDb dataset does not contain individual user rating logs, "
-            "NO collaborative filtering performance (collaborative Recall/NDCG) is claimed."
+            "Evaluated strictly via content-based target recovery where targets share genres and languages "
+            "with conditioned liked items. No collaborative filtering performance (collaborative Recall/NDCG) "
+            "is claimed because IMDb datasets contain no individual user rating logs."
         ),
-        "total_probes": total,
-        "metrics": {
-            "pure_content_top10": {
-                "hit_rate_10": round(hits_10_no_mmr / total, 4),
-                "mean_target_similarity_10": round(float(np.mean(sims_10_no_mmr)), 4),
-                "ild_10": round(float(np.mean(ild_no_mmr)), 4),
-                "catalog_coverage_unique_items": len(unique_recs_no_mmr),
-            },
-            "content_plus_mmr_top10": {
-                "hit_rate_10": round(hits_10_mmr / total, 4),
-                "hit_rate_20": round(hits_20_mmr / total, 4),
-                "mean_target_similarity_10": round(float(np.mean(sims_10_mmr)), 4),
-                "ild_10": round(float(np.mean(ild_mmr)), 4),
-                "catalog_coverage_unique_items": len(unique_recs_mmr),
-                "ild_improvement_pct": round(
-                    ((np.mean(ild_mmr) - np.mean(ild_no_mmr)) / np.mean(ild_no_mmr)) * 100, 2
-                ),
-            },
-            "alignment": {
-                "origin_region_consistency_10": round(float(np.mean(region_match_counts)), 4),
-                "genre_overlap_consistency_10": round(float(np.mean(genre_match_counts)), 4),
-            },
-        },
+        "limitations": (
+            "Target films share attributes with the liked films by construction, so this is a content-similarity "
+            "sanity check and candidate-retrieval benchmark, not evidence of personalization quality."
+        ),
     }
 
-    # Save to JSON
+    # Save artifacts/global_eval_results.json
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    out_file = artifacts_dir / "global_eval_results.json"
-    with open(out_file, "w", encoding="utf-8") as f:
+    results_path = artifacts_dir / "global_eval_results.json"
+    with open(results_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
+    logger.info(f"Saved evaluation results to {results_path}")
 
-    # Save to Markdown
-    DOCS_DIR.mkdir(parents=True, exist_ok=True)
-    md_content = f"""# 🌍 World Cinema Recommender Evaluation
+    # Generate docs/global_eval.md
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    doc_path = docs_dir / "global_eval.md"
+    md_content = f"""# World Cinema Recommender Evaluation
 
-> **Honest Metric Disclaimer**:
-> This evaluation is conducted strictly via **leave-one-out content similarity** on verified items from the IMDb non-commercial catalog ($N={total}$ evaluation probes).
-> Because the IMDb dataset does **not** provide user interaction histories or rating logs, **NO collaborative filtering performance (e.g. collaborative Recall@10, user NDCG)** is claimed for this catalog.
+**Evaluation Benchmark**: Honest Content Target Recovery ($N={actual_n}$, seed={seed}) over {n_items:,} films from IMDb non-commercial datasets with Wikidata (CC0) origin and language metadata.
 
----
+## Protocol
+For each target film $T$:
+1. Identify all other films in the catalog sharing at least one genre and at least one original language with $T$.
+2. Randomly sample two distinct conditioning films $A$ and $B$.
+3. Construct the user taste profile from $A$ and $B$ only.
+4. Rank the entire catalog excluding $A$ and $B$.
+5. A **Hit** is scored if target film $T$ appears in the top-20 recommendations ($K=20$).
 
-## 📊 Content-Based Leave-One-Out Evaluation Results
+## Results Comparison
 
-| Pipeline Configuration | Hit Rate@10 | Hit Rate@20 | Target Cosine Sim@10 | Intra-List Diversity (ILD@10) | Unique Catalog Coverage |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **Pure Content (TF-IDF + Bayesian Prior, $\\lambda=1.0$)** | **{results['metrics']['pure_content_top10']['hit_rate_10']:.4f}** | — | **{results['metrics']['pure_content_top10']['mean_target_similarity_10']:.4f}** | {results['metrics']['pure_content_top10']['ild_10']:.4f} | {results['metrics']['pure_content_top10']['catalog_coverage_unique_items']:,} |
-| **Content + MMR Diversity ($\\lambda=0.7$)** | {results['metrics']['content_plus_mmr_top10']['hit_rate_10']:.4f} | **{results['metrics']['content_plus_mmr_top10']['hit_rate_20']:.4f}** | {results['metrics']['content_plus_mmr_top10']['mean_target_similarity_10']:.4f} | **{results['metrics']['content_plus_mmr_top10']['ild_10']:.4f}** (+{results['metrics']['content_plus_mmr_top10']['ild_improvement_pct']}%) | **{results['metrics']['content_plus_mmr_top10']['catalog_coverage_unique_items']:,}** |
+| Model / Pipeline | Hit@20 | Hits ({actual_n} targets) | Absolute Lift vs Baseline |
+| :--- | :---: | :---: | :---: |
+| **MovieMind Content Recommender (TF-IDF + Prior + MMR $\lambda=0.7$)** | **{rec_hit_rate * 100:.2f}%** | **{hits_rec}** | — |
+| **Random Ranking Baseline** | {rand_hit_rate * 100:.2f}% | {hits_rand} | {lift_over_random * 100:+.2f}% |
+| **Popularity Ranking Baseline (Most Votes)** | {pop_hit_rate * 100:.2f}% | {hits_pop} | {lift_over_popularity * 100:+.2f}% |
 
----
+- **Lift over Random**: **{lift_over_random * 100:+.2f}%** ({rec_hit_rate * 100:.2f}% vs {rand_hit_rate * 100:.2f}%)
+- **Lift over Popularity**: **{lift_over_popularity * 100:+.2f}%** ({rec_hit_rate * 100:.2f}% vs {pop_hit_rate * 100:.2f}%)
 
-## 🎯 Consistency & Alignment Metrics
-
-- **Genre Overlap Consistency@10**: **{results['metrics']['alignment']['genre_overlap_consistency_10'] * 100:.1f}%** of recommended items share primary genre classifications with the probe movie.
-- **Origin Region Consistency@10**: **{results['metrics']['alignment']['origin_region_consistency_10'] * 100:.1f}%** of unconstrained recommendations preserve the approximate origin region.
-- **MMR Diversity Impact**: Setting $\\lambda=0.7$ increases Intra-List Diversity by **+{results['metrics']['content_plus_mmr_top10']['ild_improvement_pct']}%** while maintaining strong target recovery ({results['metrics']['content_plus_mmr_top10']['hit_rate_10'] * 100:.1f}% Hit@10, {results['metrics']['content_plus_mmr_top10']['hit_rate_20'] * 100:.1f}% Hit@20).
+## Honest Limitations
+1. **Sanity Check Only**: The target film shares attributes (genre and original language) with the conditioned liked films by construction. This evaluation is an attribute-conditioned retrieval sanity check, not proof of individual user satisfaction or personalization quality.
+2. **No Collaborative Filtering**: IMDb non-commercial datasets do not publish user-level viewing or rating histories. No collaborative filtering performance (collaborative Recall@K, NDCG@K) is claimed on this catalog.
+3. **Sparse & Multi-Origin Films**: Films with sparse metadata or co-productions with multiple countries are matched across all listed countries.
 """
-    with open(DOCS_DIR / "global_eval.md", "w", encoding="utf-8") as f:
+    with open(doc_path, "w", encoding="utf-8") as f:
         f.write(md_content)
+    logger.info(f"Generated evaluation report at {doc_path}")
 
-    print(f"[global_eval] Saved evaluation results to {out_file} and docs/global_eval.md")
+    print("\n=== World Cinema Evaluation Results ===")
+    print(f"Targets evaluated (N):             {actual_n} (seed={seed})")
+    print(f"Recommender Hit@20:                {hits_rec}/{actual_n} ({rec_hit_rate * 100:.2f}%)")
+    print(f"Random Ranking Hit@20:             {hits_rand}/{actual_n} ({rand_hit_rate * 100:.2f}%)")
+    print(f"Popularity Ranking Hit@20:         {hits_pop}/{actual_n} ({pop_hit_rate * 100:.2f}%)")
+    print(f"Lift over Random Baseline:         {lift_over_random * 100:+.2f}%")
+    print(f"Lift over Popularity Baseline:     {lift_over_popularity * 100:+.2f}%")
+    print("=======================================\n")
+
     return results
+
 
 if __name__ == "__main__":
     run_global_evaluation()

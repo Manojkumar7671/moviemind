@@ -1,26 +1,15 @@
 {
-  "catalog": "World Cinema (IMDb Datasets)",
-  "evaluation_type": "Leave-one-out Content Similarity",
-  "honesty_disclaimer": "Evaluated strictly via content-based leave-one-out item similarity. Because the IMDb dataset does not contain individual user rating logs, NO collaborative filtering performance (collaborative Recall/NDCG) is claimed.",
-  "total_probes": 500,
-  "metrics": {
-    "pure_content_top10": {
-      "hit_rate_10": 0.908,
-      "mean_target_similarity_10": 0.8374,
-      "ild_10": 0.2033,
-      "catalog_coverage_unique_items": 4262
-    },
-    "content_plus_mmr_top10": {
-      "hit_rate_10": 0.912,
-      "hit_rate_20": 0.958,
-      "mean_target_similarity_10": 0.8335,
-      "ild_10": 0.2159,
-      "catalog_coverage_unique_items": 7627,
-      "ild_improvement_pct": 6.16
-    },
-    "alignment": {
-      "origin_region_consistency_10": 0.9244,
-      "genre_overlap_consistency_10": 0.9596
-    }
-  }
+  "n_samples": 500,
+  "seed": 42,
+  "catalog_size": 33485,
+  "recommender_hit20": 0.052,
+  "recommender_hits": 26,
+  "random_hit20": 0.0,
+  "random_hits": 0,
+  "popularity_hit20": 0.0,
+  "popularity_hits": 0,
+  "lift_over_random": 0.052,
+  "lift_over_popularity": 0.052,
+  "honesty_disclaimer": "Evaluated strictly via content-based target recovery where targets share genres and languages with conditioned liked items. No collaborative filtering performance (collaborative Recall/NDCG) is claimed because IMDb datasets contain no individual user rating logs.",
+  "limitations": "Target films share attributes with the liked films by construction, so this is a content-similarity sanity check and candidate-retrieval benchmark, not evidence of personalization quality."
 }
