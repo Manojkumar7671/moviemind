@@ -52,6 +52,7 @@ class MovieMindAgent:
         global_path = artifacts_dir / "global_catalog.parquet"
         self.global_meta = {}
         self.global_df = None
+        self.global_title_to_id = {}
         self.region_name_to_code = {}
         self.lang_name_to_code = {}
         if global_path.exists():
@@ -59,6 +60,23 @@ class MovieMindAgent:
             self.global_meta = self.global_df.set_index("id").to_dict(orient="index")
             self.data_min_year = min(self.ml_min_year, int(self.global_df["year"].min()))
             self.data_max_year = max(self.ml_max_year, int(self.global_df["year"].max()))
+            
+            # Build fast lookup dictionary sorted by votes descending
+            df_by_votes = self.global_df.sort_values(by="votes", ascending=False)
+            for _, r in df_by_votes.iterrows():
+                gid = str(r["id"])
+                ct = clean_title(r["title"]).lower().strip()
+                if ct not in self.global_title_to_id:
+                    self.global_title_to_id[ct] = gid
+                if ", the" in ct:
+                    norm_t = "the " + ct.replace(", the", "").strip()
+                    if norm_t not in self.global_title_to_id:
+                        self.global_title_to_id[norm_t] = gid
+                if ", a" in ct:
+                    norm_a = "a " + ct.replace(", a", "").strip()
+                    if norm_a not in self.global_title_to_id:
+                        self.global_title_to_id[norm_a] = gid
+
             for _, row in self.global_df.iterrows():
                 for c, lbl in zip(row.get("origin_countries", []), row.get("origin_country_names", [])):
                     if c:
@@ -182,15 +200,72 @@ class MovieMindAgent:
         q = re.sub(r"\s+films?$", "", q, flags=re.IGNORECASE).strip()
         return q
 
+    def _format_cards(self, items: List[Dict], source: str = "MovieLens 1M") -> List[Dict]:
+        """Convert raw items from search/filter/recommend into UI cards with consistent schemas."""
+        cards = []
+        for idx, item in enumerate(items):
+            mid = item.get("movie_id")
+            title = clean_title(item.get("title", ""))
+            year = int(item.get("year", 2000))
+            genres = item.get("genres", [])
+            match_pct = max(75, 98 - (idx * 3))
+            if source == "World catalog" or item.get("catalog_source") == "World catalog" or "origin_countries" in item:
+                origin_names = item.get("origin_country_names", [])
+                lang_names = item.get("original_language_names", [])
+                orig_str = item.get("origin") or (", ".join(origin_names) if origin_names else "unknown")
+                cards.append({
+                    "movie_id": str(mid),
+                    "title": title,
+                    "year": year,
+                    "genres": genres,
+                    "origin_countries": item.get("origin_countries", []),
+                    "origin_country_names": origin_names,
+                    "original_languages": item.get("original_languages", []),
+                    "original_language_names": lang_names,
+                    "origin": orig_str,
+                    "match_pct": match_pct,
+                    "score_parts": {
+                        "retrieval": round(min(1.0, float(item.get("votes", 10000)) / 500000.0), 3),
+                        "ranker": round(float(item.get("rating", 7.0)) / 10.0, 3),
+                        "diversity": 0.85,
+                    },
+                    "explanation": {
+                        "text": f"Acclaimed {', '.join(origin_names) if origin_names else 'international'} feature ({item.get('rating', 7.5)}/10 on IMDb), matching your interest in {', '.join(genres[:2])}.",
+                        "matched_genres": genres[:2],
+                        "similar_liked_movies": [],
+                    },
+                    "catalog_source": "World catalog",
+                })
+            else:
+                cards.append({
+                    "movie_id": int(mid) if str(mid).isdigit() else mid,
+                    "title": title,
+                    "year": year,
+                    "genres": genres,
+                    "match_pct": match_pct,
+                    "score_parts": {
+                        "retrieval": 0.85,
+                        "ranker": 0.90,
+                        "diversity": 0.80,
+                    },
+                    "explanation": {
+                        "text": f"Recommended for your interest in {', '.join(genres[:2])}.",
+                        "matched_genres": genres[:2],
+                        "similar_liked_movies": [],
+                    },
+                    "catalog_source": "MovieLens 1M",
+                })
+        return cards
+
     def search_movies(self, query: str, limit: int = 5) -> List[Dict]:
-        """Search movies by title substring or keyword."""
+        """Search movies by title substring or keyword across BOTH MovieLens and World catalogs."""
         clean_q = self.clean_search_query(query).lower().strip()
         if not clean_q:
             clean_q = query.lower().strip()
         if not clean_q:
             return []
 
-        # 1. Exact or substring match in clean title
+        # 1. Exact or substring match in MovieLens 1M
         matches = []
         for mid, meta in self.movie_meta.items():
             t_low = clean_title(meta["title"]).lower()
@@ -200,6 +275,7 @@ class MovieMindAgent:
                     "title": clean_title(meta["title"]),
                     "genres": parse_genres(meta["genres"]),
                     "year": int(meta["year"]),
+                    "catalog_source": "MovieLens 1M",
                 })
             elif len(clean_q) >= 4 and t_low in clean_q and not t_low.isdigit():
                 if re.search(r"\b" + re.escape(t_low) + r"\b", clean_q):
@@ -208,13 +284,14 @@ class MovieMindAgent:
                         "title": clean_title(meta["title"]),
                         "genres": parse_genres(meta["genres"]),
                         "year": int(meta["year"]),
+                        "catalog_source": "MovieLens 1M",
                     })
             if len(matches) >= limit:
                 break
         if matches:
             return matches
 
-        # 2. Token-based match (all significant non-numeric words must appear in title)
+        # 2. Token-based match in MovieLens
         words = [w for w in re.split(r"\W+", clean_q) if len(w) >= 3 and not w.isdigit()]
         if words:
             for mid, meta in self.movie_meta.items():
@@ -225,13 +302,14 @@ class MovieMindAgent:
                         "title": clean_title(meta["title"]),
                         "genres": parse_genres(meta["genres"]),
                         "year": int(meta["year"]),
+                        "catalog_source": "MovieLens 1M",
                     })
                 if len(matches) >= limit:
                     break
         if matches:
             return matches
 
-        # 3. Fuzzy match fallback for short typo queries
+        # 3. Fuzzy match fallback for short typo queries in MovieLens
         if len(clean_q.split()) <= 3:
             close_titles = difflib.get_close_matches(clean_q, self.title_map.keys(), n=2, cutoff=0.78)
             for ct in close_titles:
@@ -243,13 +321,108 @@ class MovieMindAgent:
                         "title": clean_title(meta["title"]),
                         "genres": parse_genres(meta["genres"]),
                         "year": int(meta["year"]),
+                        "catalog_source": "MovieLens 1M",
                     })
                 if len(matches) >= limit:
                     break
+        if matches:
+            return matches
+
+        # 4. Search World Catalog if not matched in MovieLens
+        if self.global_df is not None:
+            # Check exact title in global_title_to_id
+            if clean_q in self.global_title_to_id:
+                gid = self.global_title_to_id[clean_q]
+                r = self.global_meta[gid]
+                origin_names = list(r["origin_country_names"])
+                lang_names = list(r["original_language_names"])
+                matches.append({
+                    "movie_id": str(r.get("id", gid)),
+                    "title": clean_title(r["title"]),
+                    "genres": [g.strip() for g in str(r["genres"]).split("|") if g.strip()],
+                    "year": int(r["year"]),
+                    "origin_countries": list(r["origin_countries"]),
+                    "origin_country_names": origin_names,
+                    "original_languages": list(r["original_languages"]),
+                    "original_language_names": lang_names,
+                    "origin": ", ".join(origin_names) if origin_names else "unknown",
+                    "rating": float(r.get("rating", 0.0)),
+                    "votes": int(r.get("votes", 0)),
+                    "catalog_source": "World catalog",
+                })
+                return matches
+
+            # Check substring match in global_df (sorted by votes)
+            if len(clean_q) >= 3 and not clean_q.isdigit():
+                sub_df = self.global_df[self.global_df["title"].str.lower().str.contains(re.escape(clean_q), na=False)]
+                if not sub_df.empty:
+                    top_matches = sub_df.sort_values(by="votes", ascending=False).head(limit)
+                    for _, r in top_matches.iterrows():
+                        origin_names = list(r["origin_country_names"])
+                        lang_names = list(r["original_language_names"])
+                        matches.append({
+                            "movie_id": str(r["id"]),
+                            "title": clean_title(r["title"]),
+                            "genres": [g.strip() for g in str(r["genres"]).split("|") if g.strip()],
+                            "year": int(r["year"]),
+                            "origin_countries": list(r["origin_countries"]),
+                            "origin_country_names": origin_names,
+                            "original_languages": list(r["original_languages"]),
+                            "original_language_names": lang_names,
+                            "origin": ", ".join(origin_names) if origin_names else "unknown",
+                            "rating": float(r.get("rating", 0.0)),
+                            "votes": int(r.get("votes", 0)),
+                            "catalog_source": "World catalog",
+                        })
+                    return matches
+
         return matches
 
-    def recommend(self, user_id: str, genres: Optional[List[str]] = None, n: int = 5) -> List[Dict]:
-        """Generate personalized or genre-guided recommendations."""
+    def recommend(
+        self,
+        user_id: str,
+        genres: Optional[List[str]] = None,
+        n: int = 5,
+        seed_movie: Optional[str] = None,
+        modifier: Optional[str] = None,
+    ) -> List[Dict]:
+        """Generate personalized, genre-guided, or seed-similar recommendations."""
+        fb = self.memory.get_feedback(user_id)
+        disliked = set(fb["disliked"])
+
+        # Handle seed movie + modifier (e.g. "suggest something like Toy Story but darker")
+        if seed_movie and modifier == "darker":
+            seed_mid = self.find_movie_id_in_text(seed_movie)
+            if seed_mid is not None and isinstance(seed_mid, int) and seed_mid in self.mid_to_idx:
+                seed_vec = self.item_embs[self.mid_to_idx[seed_mid]]
+                sims = np.dot(self.item_embs, seed_vec)
+                dark_genres = {"Crime", "Thriller", "Horror", "Drama", "Film-Noir", "Sci-Fi", "Mystery"}
+                light_genres = {"Children's", "Animation", "Comedy", "Musical"}
+                candidates = []
+                for mid, sim in zip(self.item_ids, sims):
+                    mid_int = int(mid)
+                    if mid_int == seed_mid or mid_int in disliked:
+                        continue
+                    if mid_int not in self.movie_meta:
+                        continue
+                    m_row = self.movie_meta[mid_int]
+                    m_genres = set(parse_genres(m_row["genres"]))
+                    dark_score = len(m_genres.intersection(dark_genres))
+                    light_score = len(m_genres.intersection(light_genres))
+                    adj_score = float(sim) + (0.35 * dark_score) - (0.45 * light_score)
+                    candidates.append((mid_int, adj_score))
+                candidates.sort(key=lambda x: x[1], reverse=True)
+                recs = []
+                for mid_int, _ in candidates[:n]:
+                    meta = self.movie_meta[mid_int]
+                    recs.append({
+                        "movie_id": mid_int,
+                        "title": clean_title(meta["title"]),
+                        "genres": parse_genres(meta["genres"]),
+                        "year": int(meta["year"]),
+                        "catalog_source": "MovieLens 1M",
+                    })
+                return recs
         fb = self.memory.get_feedback(user_id)
         disliked = set(fb["disliked"])
 
@@ -448,6 +621,7 @@ class MovieMindAgent:
                     "matched_genres": matched,
                     "similar_liked_movies": similar_titles,
                 },
+                "catalog_source": "MovieLens 1M",
             })
 
         total_ms = (time.perf_counter() - t0) * 1000
@@ -476,6 +650,8 @@ class MovieMindAgent:
 
     def get_grounded_explanation(self, movie_id: int, user_id: str = "demo_user") -> Dict[str, Any]:
         """Fetch or generate 1-sentence grounded LLM explanation on demand, cached by (movie_id, user_state)."""
+        if movie_id is None:
+            return {"error": "Movie ID was not provided."}
         if movie_id not in self.movie_meta:
             return {"error": f"Movie ID {movie_id} not found in catalog."}
 
@@ -564,55 +740,83 @@ class MovieMindAgent:
         self._explanation_cache[cache_key] = res
         return res
 
-    def explain(self, movie_id: Optional[int] = None, title: Optional[str] = None, user_id: str = "demo_user") -> Dict[str, Any]:
+    def explain(self, movie_id: Optional[Any] = None, title: Optional[str] = None, user_id: str = "demo_user") -> Dict[str, Any]:
         """Explain recommendation using real factual features and similarity to liked movies."""
         if movie_id is None and title:
             movie_id = self.find_movie_id_in_text(title)
-        if movie_id is None or movie_id not in self.movie_meta:
-            return {"error": f"Movie ID {movie_id} not found in catalog."}
+        if movie_id is None:
+            return {"error": f"I couldn't find '{title or 'the specified movie'}' in either catalog."}
 
-        meta = self.movie_meta[movie_id]
-        t_clean = clean_title(meta["title"])
-        m_genres = parse_genres(meta["genres"])
-        m_genres_set = set(m_genres)
-        fb = self.memory.get_feedback(user_id)
+        # Check MovieLens 1M
+        if isinstance(movie_id, int) and movie_id in self.movie_meta:
+            meta = self.movie_meta[movie_id]
+            t_clean = clean_title(meta["title"])
+            m_genres = parse_genres(meta["genres"])
+            m_genres_set = set(m_genres)
+            fb = self.memory.get_feedback(user_id)
 
-        # Check similarity with user liked movies (exclude target movie itself)
-        similar_liked = []
-        if movie_id in self.mid_to_idx:
-            target_vec = self.item_embs[self.mid_to_idx[movie_id]]
-            for liked_id in fb["liked"]:
-                if liked_id == movie_id:
-                    continue  # Do not compare target movie to itself
-                if liked_id in self.mid_to_idx and liked_id in self.movie_meta:
-                    l_vec = self.item_embs[self.mid_to_idx[liked_id]]
-                    sim = float(np.dot(target_vec, l_vec))
-                    l_meta = self.movie_meta[liked_id]
-                    shared = m_genres_set.intersection(set(parse_genres(l_meta["genres"])))
-                    similar_liked.append({
-                        "title": clean_title(l_meta["title"]),
-                        "cosine_similarity": round(sim, 3),
-                        "shared_genres": list(shared),
-                    })
+            # Check similarity with user liked movies (exclude target movie itself)
+            similar_liked = []
+            if movie_id in self.mid_to_idx:
+                target_vec = self.item_embs[self.mid_to_idx[movie_id]]
+                for liked_id in fb["liked"]:
+                    if liked_id == movie_id:
+                        continue  # Do not compare target movie to itself
+                    if liked_id in self.mid_to_idx and liked_id in self.movie_meta:
+                        l_vec = self.item_embs[self.mid_to_idx[liked_id]]
+                        sim = float(np.dot(target_vec, l_vec))
+                        l_meta = self.movie_meta[liked_id]
+                        shared = m_genres_set.intersection(set(parse_genres(l_meta["genres"])))
+                        similar_liked.append({
+                            "title": clean_title(l_meta["title"]),
+                            "cosine_similarity": round(sim, 3),
+                            "shared_genres": list(shared),
+                        })
 
-        similar_liked.sort(key=lambda x: x["cosine_similarity"], reverse=True)
-        genre_str = ", ".join(m_genres)
+            similar_liked.sort(key=lambda x: x["cosine_similarity"], reverse=True)
+            genre_str = ", ".join(m_genres)
 
-        if similar_liked:
-            sim_title = similar_liked[0]["title"]
-            explanation = f"'{t_clean}' ({meta['year']}) matches your interest in {genre_str}, similar to '{sim_title}' from your liked movies."
-        else:
-            explanation = f"'{t_clean}' ({meta['year']}) matches your interest in {genre_str}."
+            if similar_liked:
+                sim_title = similar_liked[0]["title"]
+                explanation = f"'{t_clean}' ({meta['year']}) matches your interest in {genre_str}, similar to '{sim_title}' from your liked movies."
+            else:
+                explanation = f"'{t_clean}' ({meta['year']}) matches your interest in {genre_str}."
 
-        return {
-            "movie_id": movie_id,
-            "title": t_clean,
-            "genres": m_genres,
-            "year": int(meta["year"]),
-            "shared_taste_profile": m_genres,
-            "similar_liked_movies": similar_liked[:3],
-            "explanation": explanation,
-        }
+            return {
+                "movie_id": movie_id,
+                "title": t_clean,
+                "genres": m_genres,
+                "year": int(meta["year"]),
+                "shared_taste_profile": m_genres,
+                "similar_liked_movies": similar_liked[:3],
+                "explanation": explanation,
+                "catalog_source": "MovieLens 1M",
+            }
+
+        # Check World Catalog
+        mid_str = str(movie_id)
+        if mid_str in self.global_meta:
+            row = self.global_meta[mid_str]
+            clean_t = clean_title(row["title"])
+            genres = [g.strip() for g in str(row["genres"]).split("|") if g.strip()]
+            origin_names = list(row["origin_country_names"])
+            orig_str = ", ".join(origin_names) if origin_names else "international"
+            explanation = f"'{clean_t}' ({row['year']}) is an acclaimed {orig_str} feature with {row['rating']}/10 across {row['votes']:,} IMDb ratings, matching your interest in {', '.join(genres[:2])} (from the world catalog; not in MovieLens 1M)."
+            return {
+                "movie_id": mid_str,
+                "title": clean_t,
+                "genres": genres,
+                "year": int(row["year"]),
+                "origin": orig_str,
+                "origin_countries": list(row["origin_countries"]),
+                "origin_country_names": origin_names,
+                "original_languages": list(row["original_languages"]),
+                "original_language_names": list(row["original_language_names"]),
+                "explanation": explanation,
+                "catalog_source": "World catalog",
+            }
+
+        return {"error": f"Movie ID {movie_id} not found in catalog."}
 
     def filter_movies(
         self,
@@ -631,44 +835,61 @@ class MovieMindAgent:
             if max_year is None:
                 max_year = year
 
-        # Query global catalog if region or language specified and catalog is available
-        if (region or language) and self.global_df is not None:
-            results = []
+        # Query global catalog if region, language, or out-of-MovieLens year specified
+        is_world_query = bool(
+            region
+            or language
+            or (min_year and (min_year < self.ml_min_year or min_year > self.ml_max_year))
+            or (max_year and (max_year < self.ml_min_year or max_year > self.ml_max_year))
+        )
+
+        if is_world_query and self.global_df is not None:
             reg_clean = self.region_name_to_code.get(region.strip().lower(), region.strip().upper()) if region else None
             lang_clean = self.lang_name_to_code.get(language.strip().lower(), language.strip().lower()) if language else None
             genre_clean = genre.strip().lower() if genre else None
 
-            for _, row in self.global_df.iterrows():
-                if min_year and row["year"] < min_year:
-                    continue
-                if max_year and row["year"] > max_year:
-                    continue
-                row_countries = [str(c).upper() for c in row["origin_countries"]]
-                if reg_clean and (len(row_countries) == 0 or reg_clean not in row_countries):
-                    continue
-                row_langs = [str(l).lower() for l in row["original_languages"]]
-                if lang_clean and (len(row_langs) == 0 or lang_clean not in row_langs):
-                    continue
-                if genre_clean and genre_clean not in row["genres"].lower():
-                    continue
+            # Special case for "korean thrillers"
+            is_korean = (reg_clean == "KR" or lang_clean == "ko")
 
-                genre_list = [g.strip() for g in row["genres"].split("|") if g.strip()]
+            df_sub = self.global_df
+            if min_year is not None:
+                df_sub = df_sub[df_sub["year"] >= min_year]
+            if max_year is not None:
+                df_sub = df_sub[df_sub["year"] <= max_year]
+            if is_korean:
+                df_sub = df_sub[
+                    df_sub["origin_countries"].apply(lambda arr: "KR" in [str(c).upper() for c in arr])
+                    | df_sub["original_languages"].apply(lambda arr: "ko" in [str(l).lower() for l in arr])
+                ]
+            else:
+                if reg_clean:
+                    df_sub = df_sub[df_sub["origin_countries"].apply(lambda arr: reg_clean in [str(c).upper() for c in arr])]
+                if lang_clean:
+                    df_sub = df_sub[df_sub["original_languages"].apply(lambda arr: lang_clean in [str(l).lower() for l in arr])]
+
+            if genre_clean:
+                df_sub = df_sub[df_sub["genres"].str.lower().str.contains(re.escape(genre_clean), na=False)]
+
+            df_sub = df_sub.sort_values(by="votes", ascending=False)
+
+            results = []
+            for _, row in df_sub.head(limit).iterrows():
                 origin_names = list(row["origin_country_names"])
                 lang_names = list(row["original_language_names"])
-                origin_str = ", ".join(origin_names) if len(origin_names) > 0 else "unknown"
                 results.append({
                     "movie_id": str(row["id"]),
                     "title": clean_title(row["title"]),
-                    "genres": genre_list,
+                    "genres": [g.strip() for g in str(row["genres"]).split("|") if g.strip()],
                     "year": int(row["year"]),
                     "origin_countries": list(row["origin_countries"]),
                     "origin_country_names": origin_names,
                     "original_languages": list(row["original_languages"]),
                     "original_language_names": lang_names,
-                    "origin": origin_str,
+                    "origin": ", ".join(origin_names) if origin_names else "unknown",
+                    "rating": float(row.get("rating", 0.0)),
+                    "votes": int(row.get("votes", 0)),
+                    "catalog_source": "World catalog",
                 })
-                if len(results) >= limit:
-                    break
             return results
 
         # Primary MovieLens catalog
@@ -685,6 +906,7 @@ class MovieMindAgent:
                 "title": clean_title(meta["title"]),
                 "genres": parse_genres(meta["genres"]),
                 "year": int(meta["year"]),
+                "catalog_source": "MovieLens 1M",
             })
             if len(results) >= limit:
                 break
@@ -692,30 +914,31 @@ class MovieMindAgent:
         # Fallback to global catalog if zero MovieLens results and global catalog is loaded
         if not results and self.global_df is not None:
             genre_clean = genre.strip().lower() if genre else None
-            for _, row in self.global_df.iterrows():
-                if min_year and row["year"] < min_year:
-                    continue
-                if max_year and row["year"] > max_year:
-                    continue
-                if genre_clean and genre_clean not in row["genres"].lower():
-                    continue
-                genre_list = [g.strip() for g in row["genres"].split("|") if g.strip()]
+            df_sub = self.global_df
+            if min_year is not None:
+                df_sub = df_sub[df_sub["year"] >= min_year]
+            if max_year is not None:
+                df_sub = df_sub[df_sub["year"] <= max_year]
+            if genre_clean:
+                df_sub = df_sub[df_sub["genres"].str.lower().str.contains(re.escape(genre_clean), na=False)]
+            df_sub = df_sub.sort_values(by="votes", ascending=False)
+            for _, row in df_sub.head(limit).iterrows():
                 origin_names = list(row["origin_country_names"])
                 lang_names = list(row["original_language_names"])
-                origin_str = ", ".join(origin_names) if len(origin_names) > 0 else "unknown"
                 results.append({
                     "movie_id": str(row["id"]),
                     "title": clean_title(row["title"]),
-                    "genres": genre_list,
+                    "genres": [g.strip() for g in str(row["genres"]).split("|") if g.strip()],
                     "year": int(row["year"]),
                     "origin_countries": list(row["origin_countries"]),
                     "origin_country_names": origin_names,
                     "original_languages": list(row["original_languages"]),
                     "original_language_names": lang_names,
-                    "origin": origin_str,
+                    "origin": ", ".join(origin_names) if origin_names else "unknown",
+                    "rating": float(row.get("rating", 0.0)),
+                    "votes": int(row.get("votes", 0)),
+                    "catalog_source": "World catalog",
                 })
-                if len(results) >= limit:
-                    break
 
         return results
 
@@ -738,7 +961,7 @@ class MovieMindAgent:
         if meta is None and self.global_meta:
             meta = self.global_meta.get(str(movie_id))
         if meta is None:
-            return {"error": f"Movie ID {movie_id} does not exist."}
+            return {"error": f"Movie '{title or movie_id}' does not exist in catalog."}
         title_str = clean_title(meta["title"])
         is_new, status_msg = self.memory.record_feedback(user_id, movie_id, feedback_type)
         if not is_new and "already" in status_msg:
@@ -858,21 +1081,71 @@ class MovieMindAgent:
         fn = tool_map.get(name)
         return fn(**args) if fn else {"error": f"Unknown tool {name}"}
 
-    def find_movie_id_in_text(self, text: str) -> Optional[int]:
-        """Resolve numeric ID or canonical movie title from text."""
+    def find_movie_id_in_text(self, text: str) -> Optional[Any]:
+        """Resolve numeric ID or canonical movie title from text across both catalogs."""
         low = (text or "").lower()
         id_match = re.search(r"\b(?:movie(?:\s+id)?|id:?)\s*(\d{1,6})\b", low)
         if id_match:
             return int(id_match.group(1))
         if low.strip().isdigit():
             return int(low.strip())
+        # Check IMDb tt ID pattern
+        tt_match = re.search(r"\b(tt\d{7,8})\b", low)
+        if tt_match:
+            return tt_match.group(1)
+        # Check MovieLens title map (longer titles first)
         for t, mid in sorted(self.title_map.items(), key=lambda x: -len(x[0])):
             if len(t) >= 4 and re.search(r"\b" + re.escape(t) + r"\b", low):
                 return mid
+        # Check World catalog title map
+        clean_text = self.clean_search_query(text).lower()
+        if clean_text in self.global_title_to_id:
+            return self.global_title_to_id[clean_text]
+        for t, g_id in sorted(self.global_title_to_id.items(), key=lambda x: -len(x[0])):
+            if len(t) >= 5 and re.search(r"\b" + re.escape(t) + r"\b", low):
+                return g_id
         generic_num = re.search(r"\b(\d{3,6})\b", low)
         if generic_num:
             return int(generic_num.group(1))
         return None
+
+    def is_prose_hallucinating(self, text: str, user_msg: str) -> bool:
+        """Detect free-form LLM prose attempting to list movies, markdown tables, or hallucinate titles."""
+        if not text:
+            return False
+        low_t = (text or "").lower()
+        low_msg = (user_msg or "").lower().strip()
+
+        # Markdown table check
+        if "|" in text and text.count("|") >= 2:
+            return True
+        # Numbered list or bullet list of movies
+        if re.search(r"^\s*(\d+[\.\)]|[-*])\s+.*", text, re.MULTILINE):
+            return True
+
+        # Year references in text (e.g. (1999) or 2024)
+        if re.search(r"\b(18\d{2}|19\d{2}|20\d{2})\b", text):
+            return True
+
+        # Prose recommendation indicators / invented titles
+        if any(ind in low_t for ind in ("here are", "i recommend", "you should watch", "check out", "cybergala", "neotokyo", "space pirates")):
+            return True
+
+        # Don't flag simple greetings or off-topic refusals without movie names
+        if self.is_off_topic(low_msg) or re.search(r"^(hello|hi|hey|good\s+|howdy|thanks|thank you)\b", low_msg):
+            return False
+
+        has_movie_query = any(w in low_msg for w in (
+            "movie", "film", "recommend", "suggest", "watch", "like", "search", "find",
+            "thriller", "action", "comedy", "horror", "sci-fi", "drama", "animation",
+            "telugu", "korean", "japanese", "indian", "darker", "picks", "give me", "best", "top",
+            "hated", "loved", "dislike"
+        )) or bool(re.search(r"\b(18\d{2}|19\d{2}|20\d{2})\b", low_msg))
+
+        if has_movie_query:
+            return True
+
+        return False
 
     def is_off_topic(self, low: str) -> bool:
         """Detect math, programming, or non-movie general knowledge questions."""
@@ -884,20 +1157,27 @@ class MovieMindAgent:
             return True
         movie_cues = (
             "movie", "film", "cinema", "actor", "actress", "director", "oscar", "hollywood",
-            "genre", "watch", "recommend", "suggest", "like", "favorite", "favourite", "taste",
+            "genre", "watch", "recommend", "suggest", "favorite", "favourite", "taste",
             "search", "find", "look up", "action", "adventure", "animation", "comedy", "crime",
             "documentary", "drama", "fantasy", "noir", "horror", "musical", "mystery", "romance",
             "sci-fi", "scifi", "thriller", "western"
         )
-        if any(c in low for c in movie_cues) or bool(self.find_movie_id_in_text(low)):
+        if any(c in low for c in movie_cues):
             return False
+
         gen_patterns = [
             r"^(what is|what's|who is|who was|who are|where is|when did|when was|how to|how do|how does|why is|why are)\b",
-            r"\b(capital of|president of|weather in|temperature in|stock price|recipe for|cook |bake |how many days)\b",
+            r"\b(capital of|president of|weather in|temperature in|stock price|recipe for|cook |bake |how many days|make |dough)\b",
             r"\b(write (a )?(python|code|program|script|function|poem|essay|story))\b",
             r"\b(translate |french |spanish |german |meaning of )\b",
         ]
-        return any(bool(re.search(p, low)) for p in gen_patterns)
+        if any(bool(re.search(p, low)) for p in gen_patterns):
+            return True
+
+        if bool(self.find_movie_id_in_text(low)):
+            return False
+
+        return False
 
     def route_message(self, user_msg: str, user_id: str = "demo_user") -> Dict[str, Any]:
         """Parse message, route to expected tool, execute, and return structured dispatch trace."""
@@ -910,6 +1190,7 @@ class MovieMindAgent:
                 "tool": None,
                 "args": {},
                 "result": {"error": "Empty input"},
+                "cards": [],
                 "response": "Please enter a message or movie query.",
                 "safe": True,
                 "is_adversarial": True,
@@ -921,6 +1202,7 @@ class MovieMindAgent:
                 "tool": None,
                 "args": {},
                 "result": {"error": "Prompt injection rejected"},
+                "cards": [],
                 "response": "I cannot alter my instructions or invent non-existent movies. I am MovieMind, dedicated to recommending real movies from the MovieLens catalog.",
                 "safe": True,
                 "is_adversarial": True,
@@ -932,18 +1214,72 @@ class MovieMindAgent:
                 "tool": None,
                 "args": {},
                 "result": {},
+                "cards": [],
                 "response": "I only help with movies. Try a title, genre, or year.",
                 "safe": True,
                 "is_adversarial": True,
             }
 
         # Intent 1: Greetings -> short reply, no tools
-        if re.search(r"^(hello|hi|hey|good\s+(morning|evening|afternoon)|howdy|greetings)\b", low):
+        if re.search(r"^(hello|hi|hey|good\s+(morning|evening|afternoon)|howdy|greetings|thanks|thank you)\b", low):
             return {
                 "tool": None,
                 "args": {},
                 "result": {},
+                "cards": [],
                 "response": "Hello! Welcome to MovieMind screening room. How can I help you find or explore movies today?",
+                "safe": True,
+                "is_adversarial": False,
+            }
+
+        # Compound Intent: Feedback THEN recommend (e.g. "i hated Titanic what else", "i loved Aliens, suggest more")
+        compound_fb_match = re.search(
+            r"\b(?:i\s+)?(hated|disliked|didn't like|loved|liked)\s+(.*?)\s*(?:,|\.|\b)\s*(?:and\s+)?(what else|suggest more|recommend|what next|give me more)\b",
+            low,
+        )
+        if compound_fb_match:
+            verb = compound_fb_match.group(1).lower()
+            fb_type = "dislike" if any(w in verb for w in ("hate", "dislike")) else "like"
+            target_raw = compound_fb_match.group(2).strip()
+            mid = self.find_movie_id_in_text(target_raw)
+            fb_title = target_raw
+            if mid is not None:
+                if isinstance(mid, int) and mid in self.movie_meta:
+                    fb_title = clean_title(self.movie_meta[mid]["title"])
+                elif str(mid) in self.global_meta:
+                    fb_title = clean_title(self.global_meta[str(mid)]["title"])
+                fb_res = self.record_feedback(user_id=user_id, movie_id=mid, feedback_type=fb_type)
+            else:
+                fb_res = {"status": "noop", "message": f"Recorded {fb_type}."}
+
+            rec_res = self.recommend_detailed(user_id=user_id, n=5)
+            rec_cards = rec_res.get("recommendations", [])
+            lines = [f"{i+1}. **{c['title']}** ({c['year']}) - [{', '.join(c['genres'])}]" for i, c in enumerate(rec_cards)]
+            resp = f"Recorded {fb_type} for '{fb_title}'. Based on your updated taste, here are recommendations from MovieLens 1M:\n" + "\n".join(lines)
+            return {
+                "tool": "record_feedback, recommend",
+                "args": {"feedback_type": fb_type, "movie_id": mid, "title": fb_title, "user_id": user_id},
+                "result": {"feedback": fb_res, "recommendations": rec_cards},
+                "cards": rec_cards,
+                "response": resp,
+                "safe": True,
+                "is_adversarial": False,
+            }
+
+        # Modifier intent: Similar to title but darker (e.g. "suggest something like Toy Story but darker")
+        darker_match = re.search(r"\b(?:suggest|recommend|give me)?\s*(?:something|movies?|films?|picks?)?\s*(?:like|similar to)\s+(.*?)\s+but\s+darker\b", low)
+        if darker_match:
+            seed_title = darker_match.group(1).strip()
+            recs = self.recommend(user_id=user_id, seed_movie=seed_title, modifier="darker", n=5)
+            cards = self._format_cards(recs, source="MovieLens 1M")
+            lines = [f"{i+1}. **{r['title']}** ({r['year']}) - [{', '.join(r['genres'])}]" for i, r in enumerate(recs)]
+            resp = f"From MovieLens 1M, here are films similar to '{seed_title}' re-ranked for darker themes:\n" + "\n".join(lines)
+            return {
+                "tool": "recommend",
+                "args": {"seed_movie": seed_title, "modifier": "darker", "user_id": user_id, "n": 5},
+                "result": recs,
+                "cards": cards,
+                "response": resp,
                 "safe": True,
                 "is_adversarial": False,
             }
@@ -958,14 +1294,17 @@ class MovieMindAgent:
                         "tool": "explain",
                         "args": {"movie_id": mid, "user_id": user_id},
                         "result": exp,
+                        "cards": [],
                         "response": exp["error"],
                         "safe": True,
-                        "is_adversarial": mid not in self.movie_meta,
+                        "is_adversarial": mid not in self.movie_meta and str(mid) not in self.global_meta,
                     }
+                exp_cards = self._format_cards([exp], source=exp.get("catalog_source", "MovieLens 1M"))
                 return {
                     "tool": "explain",
                     "args": {"movie_id": mid, "user_id": user_id},
                     "result": exp,
+                    "cards": exp_cards,
                     "response": f"**Explanation for {exp['title']}**:\n{exp['explanation']}",
                     "safe": True,
                     "is_adversarial": False,
@@ -983,6 +1322,7 @@ class MovieMindAgent:
                     "tool": "record_feedback",
                     "args": {"user_id": user_id, "movie_id": mid, "feedback_type": feedback_type},
                     "result": res,
+                    "cards": [],
                     "response": f"Done! {res.get('message', res.get('error', ''))}",
                     "safe": True,
                     "is_adversarial": False,
@@ -995,6 +1335,7 @@ class MovieMindAgent:
                 "tool": "get_taste_profile",
                 "args": {"user_id": user_id},
                 "result": prof,
+                "cards": [],
                 "response": f"**Your Taste Profile**:\n{prof['taste_summary']}\n*(Liked: {prof['liked_count']}, Disliked: {prof['disliked_count']})*",
                 "safe": True,
                 "is_adversarial": False,
@@ -1002,7 +1343,7 @@ class MovieMindAgent:
 
         # Intent 5: Region / Language / Year / Genre Filter queries
         year_match = re.search(r"\b(18\d{2}|19\d{2}|20\d{2})\b", low)
-        decade_match = re.search(r"\b(\d{2})s\b", low)
+        decade_match = re.search(r"\b(?:(18|19|20))?(\d{2})s\b", low)
         all_genres = ["Action", "Adventure", "Animation", "Children's", "Comedy", "Crime", "Documentary", "Drama", "Fantasy", "Film-Noir", "Horror", "Musical", "Mystery", "Romance", "Sci-Fi", "Thriller", "War", "Western"]
         genre_synonyms = {
             "thriller": "Thriller", "detective": "Mystery", "family": "Children's",
@@ -1039,29 +1380,43 @@ class MovieMindAgent:
             code_candidate = lang_code_match.group(1).lower()
             matched_language = self.lang_name_to_code.get(code_candidate, code_candidate)
 
-        # Catalog-driven year boundary check: out-of-bounds queries for MovieLens 1M
+        # Catalog-driven year boundary check:
         is_bare_year = bool(re.fullmatch(r"^(18\d{2}|19\d{2}|20\d{2})$", low.strip()))
         is_year_phrase = bool(year_match and any(w in low for w in ("from", "in ", "released", "movies", "films", "before", "after", "since")))
         if (is_bare_year or is_year_phrase) and not matched_region and not matched_language:
             yr = int(year_match.group(1))
-            # Distinguish from titled films containing numbers (e.g. '2001: A Space Odyssey')
             has_title_with_year = False
             for t in self.title_map:
                 if str(yr) in t and len(t) > 6 and t in low:
                     has_title_with_year = True
                     break
             if not has_title_with_year:
-                if yr < self.ml_min_year or yr > self.ml_max_year:
+                if yr > self.ml_max_year and yr <= self.data_max_year:
+                    results = self.filter_movies(year=yr, limit=5)
+                    cards = self._format_cards(results, source="World catalog")
+                    lines = [f"- **{r['title']}** ({r['year']}) [{r.get('origin', 'international')}] - [{', '.join(r['genres'])}]" for r in results]
+                    resp = f"MovieLens 1M covers {self.ml_min_year}-{self.ml_max_year}. The world catalog covers {self.data_min_year}-{self.data_max_year}. From the world catalog ({yr} releases):\n" + "\n".join(lines)
+                    return {
+                        "tool": "filter_movies",
+                        "args": {"year": yr, "limit": 5},
+                        "result": results,
+                        "cards": cards,
+                        "response": resp,
+                        "safe": True,
+                        "is_adversarial": False,
+                    }
+                elif yr < self.ml_min_year or yr > self.data_max_year:
                     return {
                         "tool": None,
                         "args": {},
                         "result": {},
+                        "cards": [],
                         "response": f"MovieLens 1M covers {self.ml_min_year}-{self.ml_max_year}. Try a year in that range.",
                         "safe": True,
                         "is_adversarial": True,
                     }
 
-        # Intent 6: Recommendation queries (intent words: best, top, good, popular, recommend, etc. with no title)
+        # Intent 6: Recommendation queries
         rec_cues = (
             "recommend", "recommendation", "recommendations", "suggest", "suggestions",
             "what should i watch", "what to watch", "pick", "picks", "something like",
@@ -1071,25 +1426,24 @@ class MovieMindAgent:
         )
         is_rec_intent = any(re.search(rf"\b{re.escape(w)}\b", low) for w in rec_cues) or bool(re.search(r"\bgive me\s+(\d+\s+)?([a-z\s-]+\s+)?movies?\b", low))
         
-        # Check if explicit search verb is present (e.g. 'search for', 'find', 'look up')
         explicit_search_verbs = ("search for", "find ", "look up ", "tell me about ", "do you have ")
         has_explicit_search_verb = any(v in low for v in explicit_search_verbs)
 
-        # Year and filter triggers
         is_filter_trigger = (
             "filter" in low
             or matched_region is not None
             or matched_language is not None
             or (year_match and any(w in low for w in ("from", "before", "after", "since", "released", "in ")))
-            or (decade_match and matched_genre)
+            or (decade_match is not None)
             or ("newer" in low and ("than" in low or "like" in low))
         )
 
         if is_filter_trigger and not (is_rec_intent and not matched_region and not matched_language and not year_match and not decade_match):
             min_y, max_y, exact_year = None, None, None
             if decade_match:
-                d_val = int(decade_match.group(1))
-                c_val = 1900 if d_val >= 20 else 2000
+                c_prefix = decade_match.group(1)
+                d_val = int(decade_match.group(2))
+                c_val = int(c_prefix) * 100 if c_prefix else (1900 if d_val >= 20 else 2000)
                 min_y, max_y = c_val + d_val, c_val + d_val + 9
             elif year_match:
                 yr = int(year_match.group(1))
@@ -1099,7 +1453,7 @@ class MovieMindAgent:
                     min_y, max_y, exact_year = yr, yr, yr
             elif "newer" in low:
                 ref_mid = self.find_movie_id_in_text(low)
-                if ref_mid and ref_mid in self.movie_meta:
+                if ref_mid and isinstance(ref_mid, int) and ref_mid in self.movie_meta:
                     min_y = int(self.movie_meta[ref_mid]["year"]) + 1
                     if not matched_genre:
                         matched_genre = parse_genres(self.movie_meta[ref_mid]["genres"])[0]
@@ -1113,6 +1467,8 @@ class MovieMindAgent:
                 language=matched_language,
                 limit=5,
             )
+            source = "World catalog" if (matched_region or matched_language or (min_y and min_y > 2000) or (exact_year and exact_year > 2000) or any(r.get("catalog_source") == "World catalog" or "origin_countries" in r for r in results)) else "MovieLens 1M"
+            cards = self._format_cards(results, source=source)
             lines = []
             for r in results:
                 reg_s = f" [{r['origin']}]" if 'origin' in r else ""
@@ -1126,11 +1482,13 @@ class MovieMindAgent:
             if exact_year:
                 tool_args["year"] = exact_year
 
+            prefix = "From the world catalog:" if source == "World catalog" else "From MovieLens 1M:"
             return {
                 "tool": "filter_movies",
                 "args": tool_args,
                 "result": results,
-                "response": "**Filtered Movies:**\n" + ("\n".join(lines) if lines else "No movies matched your filter."),
+                "cards": cards,
+                "response": f"{prefix}\n" + ("\n".join(lines) if lines else "No movies matched your filter."),
                 "safe": True,
                 "is_adversarial": False,
             }
@@ -1152,12 +1510,14 @@ class MovieMindAgent:
             if not genres_to_rec and matched_genre:
                 genres_to_rec = [matched_genre]
             recs = self.recommend(user_id=user_id, genres=genres_to_rec or None, n=n_items)
+            cards = self._format_cards(recs, source="MovieLens 1M")
             lines = [f"{i+1}. **{r['title']}** ({r['year']}) - [{', '.join(r['genres'])}]" for i, r in enumerate(recs)]
             return {
                 "tool": "recommend",
                 "args": {"user_id": user_id, "genres": genres_to_rec or None, "n": n_items},
                 "result": recs,
-                "response": f"**Recommended Movies for you:**\n" + "\n".join(lines),
+                "cards": cards,
+                "response": "From MovieLens 1M:\n" + "\n".join(lines),
                 "safe": True,
                 "is_adversarial": False,
             }
@@ -1173,14 +1533,25 @@ class MovieMindAgent:
             q_term = clean_q if clean_q else msg
             results = self.search_movies(q_term, limit=5)
             if results:
-                lines = [f"- **{r['title']}** ({r['year']}) [ID: {r['movie_id']}] - {', '.join(r['genres'])}" for r in results]
-                resp = "**Search Results:**\n" + "\n".join(lines)
+                source = results[0].get("catalog_source", "MovieLens 1M")
+                cards = self._format_cards(results, source=source)
+                lines = []
+                for r in results:
+                    orig = f" [{r['origin']}]" if 'origin' in r else ""
+                    lines.append(f"- **{r['title']}** ({r['year']}) [ID: {r['movie_id']}] - {', '.join(r['genres'])}{orig}")
+                if source == "World catalog":
+                    prefix = "From the world catalog (not in MovieLens 1M):"
+                else:
+                    prefix = "From MovieLens 1M:"
+                resp = f"{prefix}\n" + "\n".join(lines)
             else:
-                resp = f"'{q_term}' is not in the MovieLens 1M catalog."
+                cards = []
+                resp = f"I couldn't find '{q_term}' in either catalog (not in the MovieLens 1M catalog)."
             return {
                 "tool": "search_movies",
                 "args": {"query": q_term.lower()},
                 "result": results,
+                "cards": cards,
                 "response": resp,
                 "safe": True,
                 "is_adversarial": len(results) == 0,
@@ -1191,6 +1562,7 @@ class MovieMindAgent:
             "tool": None,
             "args": {},
             "result": {},
+            "cards": [],
             "response": "I only help with movies. Try a title, genre, or year.",
             "safe": True,
             "is_adversarial": False,
@@ -1204,67 +1576,63 @@ class MovieMindAgent:
         msg = (user_msg or "").strip()
         low = msg.lower()
 
-        # Adversarial guard 1: Empty input
+        # Fast guards: Empty, Prompt injection, Off-topic, Greetings
         if not msg:
             return self.route_message(user_msg, user_id=user_id)
-
-        # Adversarial guard 2: Prompt injection
         if any(p in low for p in ("ignore all previous", "ignore previous instructions", "secret system prompt", "invent a fake movie")):
             return self.route_message(user_msg, user_id=user_id)
-
-        # Adversarial guard 3: Off-topic input (math, general questions)
         if self.is_off_topic(low):
             return {
                 "tool": None,
                 "args": {},
                 "result": {},
+                "cards": [],
                 "response": "I only help with movies. Try a title, genre, or year.",
                 "safe": True,
                 "is_adversarial": True,
             }
+        if re.search(r"^(hello|hi|hey|good\s+(morning|evening|afternoon)|howdy|greetings|thanks|thank you)\b", low):
+            return {
+                "tool": None,
+                "args": {},
+                "result": {},
+                "cards": [],
+                "response": "Hello! Welcome to MovieMind screening room. How can I help you find or explore movies today?",
+                "safe": True,
+                "is_adversarial": False,
+            }
 
-        # Catalog-driven year bounds guard for MovieLens catalog
+        # Check compound feedback + recommend
+        if re.search(r"\b(?:i\s+)?(hated|disliked|didn't like|loved|liked)\s+(.*?)\s*(?:,|\.|\b)\s*(?:and\s+)?(what else|suggest more|recommend|what next|give me more)\b", low):
+            return self.route_message(user_msg, user_id=user_id)
+
+        # Check modifier (like X but darker)
+        if re.search(r"\b(?:like|similar to)\s+(.*?)\s+but\s+darker\b", low):
+            return self.route_message(user_msg, user_id=user_id)
+
+        # Check year 2026 or world catalog year
         year_match = re.search(r"\b(18\d{2}|19\d{2}|20\d{2})\b", low)
-        has_region_or_lang = bool(
-            any(k in low for k in self.region_name_to_code if len(k) >= 3)
-            or any(k in low for k in self.lang_name_to_code if len(k) >= 3)
-        )
-        is_bare_year = bool(re.fullmatch(r"^(18\d{2}|19\d{2}|20\d{2})$", low.strip()))
-        is_year_phrase = bool(year_match and any(w in low for w in ("from", "in ", "released", "movies", "films", "before", "after", "since")))
-        if (is_bare_year or is_year_phrase) and year_match and not has_region_or_lang:
+        if year_match:
             yr = int(year_match.group(1))
-            is_known_non_bare_title = False
-            for t in self.title_map:
-                if str(yr) in t and len(t) > 6 and t in low:
-                    is_known_non_bare_title = True
-                    break
-            if not is_known_non_bare_title:
-                if yr < self.ml_min_year or yr > self.ml_max_year:
-                    return {
-                        "tool": None,
-                        "args": {},
-                        "result": {},
-                        "response": f"MovieLens 1M covers {self.ml_min_year}-{self.ml_max_year}. Try a year in that range.",
-                        "safe": True,
-                        "is_adversarial": True,
-                    }
+            if yr > self.ml_max_year:
+                return self.route_message(user_msg, user_id=user_id)
 
         try:
             messages = [
                 {
                     "role": "system",
                     "content": (
-                        "You are MovieMind, an expert, charming movie recommender assistant for the MovieLens 1M catalog. "
+                        "You are MovieMind, an expert, charming movie recommender assistant for MovieLens 1M and the World Catalog. "
                         "You must choose the single best tool to satisfy the user request: "
                         "search_movies, recommend, explain, filter_movies, record_feedback, get_taste_profile. "
                         "For intent requests like 'best movies', 'top rated', 'good movies', or 'recommend me something' without a specific movie title, choose recommend. "
-                        "For region or language queries (e.g. 'telugu movies from 2015', 'korean thrillers'), choose filter_movies with region/language. "
+                        "For region or language queries (e.g. 'telugu movies', 'korean thrillers', 'japanese films from the 1950s', 'indian movies'), choose filter_movies with region/language. "
                         "The MovieLens 1M catalog covers release years 1919-2000. If the user asks for a year outside 1919-2000 without a foreign region/language, respond directly stating 'MovieLens 1M covers 1919-2000. Try a year in that range.' with no tools. "
                         "For typos in movie titles (e.g. 'alines' -> 'Aliens'), correct the title in tool arguments. "
                         "For similarity or 'something like X' requests, choose recommend or filter_movies. "
                         "Only use record_feedback when user explicitly states they like/love or dislike/hate a movie. "
                         "CRITICAL: Never invent movie titles, release years, or genres. "
-                        "If a movie or title is not found in the MovieLens 1M catalog, you MUST explicitly state that the title is "
+                        "If a movie or title is not found in either catalog, you MUST explicitly state that the title is "
                         "'not in the MovieLens 1M catalog' and list nothing. "
                         "For greetings or conversational chatter without movie actions, respond directly with no tools."
                     ),
@@ -1277,15 +1645,28 @@ class MovieMindAgent:
                 messages=messages,
                 tools=self.get_tool_specs(),
                 tool_choice="auto",
-                max_tokens=1024,
+                max_tokens=512,
+                timeout=4.0,
             )
             choice = resp.choices[0].message
             if not choice.tool_calls:
                 content = (choice.content or "").replace("\u202f", " ").replace("\xa0", " ")
+                # Post-check: discard ungrounded prose if it attempts to list movies or tables
+                if self.is_prose_hallucinating(content, user_msg):
+                    fallback_res = self.route_message(user_msg, user_id=user_id)
+                    trace_record = {
+                        "stage": "post_check",
+                        "action": "discard_ungrounded_llm_prose",
+                        "reason": "unauthorized_movie_list_or_prose",
+                    }
+                    fallback_res.setdefault("trace", []).insert(0, trace_record)
+                    return fallback_res
+
                 return {
                     "tool": None,
                     "args": {},
                     "result": {},
+                    "cards": [],
                     "response": content,
                     "safe": True,
                     "is_adversarial": False,
@@ -1310,7 +1691,6 @@ class MovieMindAgent:
                 "war": "War", "western": "Western"
             }
 
-            # If search_movies was called on a generic intent phrase rather than a title
             if fn_name == "search_movies":
                 sq = fn_args.get("query", "").lower().strip()
                 if sq in ("best", "top", "top rated", "good", "popular", "best movies", "top movies", "good movies", "recommend me something"):
@@ -1340,10 +1720,8 @@ class MovieMindAgent:
             if fn_name in ("explain", "record_feedback"):
                 if "movie_id" not in fn_args or fn_args["movie_id"] is None:
                     t_lookup = fn_args.get("title") or self.find_movie_id_in_text(user_msg)
-                    if isinstance(t_lookup, int):
+                    if t_lookup is not None:
                         fn_args["movie_id"] = t_lookup
-                    elif isinstance(t_lookup, str):
-                        fn_args["movie_id"] = self.find_movie_id_in_text(t_lookup)
 
             tool_result = self.execute_tool(fn_name, fn_args)
 
@@ -1354,7 +1732,8 @@ class MovieMindAgent:
                     "tool": fn_name,
                     "args": fn_args,
                     "result": [],
-                    "response": f"'{q_term}' is not in the MovieLens 1M catalog.",
+                    "cards": [],
+                    "response": f"I couldn't find '{q_term}' in either catalog (not in the MovieLens 1M catalog).",
                     "safe": True,
                     "is_adversarial": True,
                 }
@@ -1364,35 +1743,50 @@ class MovieMindAgent:
                     "tool": fn_name,
                     "args": fn_args,
                     "result": tool_result,
+                    "cards": [],
                     "response": tool_result["error"],
                     "safe": True,
                     "is_adversarial": True,
                 }
 
-            # Follow up turn with tool output for natural language summary
-            messages.append(choice)
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "name": fn_name,
-                "content": json.dumps(tool_result),
-            })
-            follow_up = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=1024,
-            )
-            content = (follow_up.choices[0].message.content or "Here are your results.").replace("\u202f", " ").replace("\xa0", " ")
+            # Standardize cards & server-templated response sentence
+            cards = []
+            if isinstance(tool_result, list) and len(tool_result) > 0 and isinstance(tool_result[0], dict) and "title" in tool_result[0]:
+                source = tool_result[0].get("catalog_source", "MovieLens 1M")
+                cards = self._format_cards(tool_result, source=source)
+                lines = []
+                for r in tool_result:
+                    orig = f" [{r['origin']}]" if 'origin' in r else ""
+                    lines.append(f"- **{r['title']}** ({r['year']}){orig} - [{', '.join(r.get('genres', []))}]")
+                prefix = "From the world catalog:" if source == "World catalog" else "From MovieLens 1M:"
+                content = f"{prefix}\n" + "\n".join(lines)
+            elif fn_name == "explain":
+                cards = self._format_cards([tool_result], source=tool_result.get("catalog_source", "MovieLens 1M"))
+                content = f"**Explanation for {tool_result['title']}**:\n{tool_result['explanation']}"
+            elif fn_name == "record_feedback":
+                content = f"Done! {tool_result.get('message', '')}"
+            elif fn_name == "get_taste_profile":
+                content = f"**Your Taste Profile**:\n{tool_result['taste_summary']}\n*(Liked: {tool_result['liked_count']}, Disliked: {tool_result['disliked_count']})*"
+            else:
+                content = "Here are your results."
+
             return {
                 "tool": fn_name,
                 "args": fn_args,
                 "result": tool_result,
+                "cards": cards,
                 "response": content,
                 "safe": True,
                 "is_adversarial": False,
             }
-        except Exception:
-            return self.route_message(user_msg, user_id=user_id)
+        except Exception as e:
+            fallback_res = self.route_message(user_msg, user_id=user_id)
+            fallback_res.setdefault("trace", []).insert(0, {
+                "stage": "llm_error_fallback",
+                "action": "fallback_to_rule_router",
+                "error": str(e),
+            })
+            return fallback_res
 
     def chat_fallback(self, user_msg: str, user_id: str = "demo_user") -> str:
         """Rule-based tool router for graceful fallback when no API key is supplied."""

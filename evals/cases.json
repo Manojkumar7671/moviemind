@@ -886,5 +886,117 @@
     },
     "adversarial": false,
     "description": "Regression test: demonym region and genre route to world catalog filter"
+  },
+  {
+    "id": "dev_grounding_telugu_movies",
+    "category": "filter",
+    "message": "telugu movies",
+    "expected_tool": "filter_movies",
+    "expected_args": {
+      "language": "te"
+    },
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_korean_thrillers",
+    "category": "filter",
+    "message": "korean thrillers",
+    "expected_tool": "filter_movies",
+    "expected_args": {
+      "language": "ko",
+      "genre": "Thriller"
+    },
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_japanese_1950s",
+    "category": "filter",
+    "message": "japanese films from the 1950s",
+    "expected_tool": "filter_movies",
+    "expected_args": {
+      "region": "JP",
+      "min_year": 1950,
+      "max_year": 1959
+    },
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_indian_movies",
+    "category": "filter",
+    "message": "indian movies",
+    "expected_tool": "filter_movies",
+    "expected_args": {
+      "region": "IN"
+    },
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_toy_story_darker",
+    "category": "recommend",
+    "message": "suggest something like Toy Story but darker",
+    "expected_tool": "recommend",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_dislike_titanic_what_else",
+    "category": "feedback",
+    "message": "i hated Titanic what else",
+    "expected_tool": "record_feedback, recommend",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_like_aliens_suggest_more",
+    "category": "feedback",
+    "message": "i loved Aliens, suggest more",
+    "expected_tool": "record_feedback, recommend",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_inception_world_catalog",
+    "category": "search",
+    "message": "tell me about Inception",
+    "expected_tool": "search_movies",
+    "expected_args": {
+      "query": "inception"
+    },
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_alines_fuzzy",
+    "category": "search",
+    "message": "tell me about alines",
+    "expected_tool": "search_movies",
+    "expected_args": {
+      "query": "aliens"
+    },
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_zzxqv_not_found",
+    "category": "search",
+    "message": "tell me about Zzxqv movie",
+    "expected_tool": "search_movies",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_movies_in_2026",
+    "category": "filter",
+    "message": "movies in 2026",
+    "expected_tool": "filter_movies",
+    "expected_args": {
+      "year": 2026
+    },
+    "adversarial": false,
+    "split": "dev"
   }
 ]

@@ -291,22 +291,26 @@ def chat_endpoint(req: ChatRequest):
     if len(msg) > 500:
         raise HTTPException(status_code=400, detail="Message too long (max 500 characters)")
     t0 = time.perf_counter()
-    reply = agent.chat(req.message, user_id=uid)
+    res = agent.route_message_llm(req.message, user_id=uid)
     dur_ms = round((time.perf_counter() - t0) * 1000, 2)
 
-    low = req.message.lower()
-    cards = []
-    if any(k in low for k in ("recommend", "suggest", "what should i watch", "picks", "give me")):
-        rec_res = agent.recommend_detailed(uid, n=4)
-        cards = rec_res.get("recommendations", [])
+    cards = res.get("cards", [])
+    if not cards and isinstance(res.get("result"), list) and len(res["result"]) > 0:
+        if isinstance(res["result"][0], dict) and "title" in res["result"][0]:
+            source = res["result"][0].get("catalog_source", "MovieLens 1M")
+            cards = agent._format_cards(res["result"], source=source)
+
+    trace = res.get("trace", [])
+    if not trace:
+        trace = [{"tool": res.get("tool"), "args": res.get("args"), "latency_ms": dur_ms}]
 
     return {
-        "response": reply,
+        "response": res.get("response", ""),
         "user_id": uid,
         "cards": cards,
-        "latency_ms": {"total": dur_ms},
-        "trace": [{"tool": "chat_router", "args": {"message": req.message}, "latency_ms": dur_ms}],
-        "llm_fallback": bool(not agent.client),
+        "latency_ms": res.get("latency_ms", {"total": dur_ms}),
+        "trace": trace,
+        "llm_fallback": res.get("llm_fallback", bool(not agent.client)),
     }
 
 @app.post("/api/feedback")
