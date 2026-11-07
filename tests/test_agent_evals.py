@@ -118,7 +118,7 @@ def _evaluate_router(agent: MovieMindAgent, eval_cases: list, use_llm: bool = Fa
         "case_results": case_results,
     }
 
-def test_run_agent_evaluations(agent, eval_cases):
+def test_run_agent_evaluations(agent, eval_cases, tmp_path):
     # Evaluate strictly on held-out cases
     held_out_cases = [c for c in eval_cases if c.get("split") == "held_out"]
     assert len(held_out_cases) >= 15, f"Expected >= 15 held-out cases, got {len(held_out_cases)}"
@@ -172,8 +172,9 @@ def test_run_agent_evaluations(agent, eval_cases):
         "categories": fb_eval["categories"],
     }
 
-    RESULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(RESULTS_FILE, "w", encoding="utf-8") as f:
+    # Write test output strictly to tmp_path to prevent git churn on tracked files during pytest
+    tmp_results = tmp_path / "results.json"
+    with open(tmp_results, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
     # Generate docs/agent_evals.md
@@ -261,8 +262,8 @@ def test_run_agent_evaluations(agent, eval_cases):
         "- Interprets requests like `'something like Aliens but newer'` (year-constrained filtering), `'good 90s thriller'` (decade filtering), `'space movies with lasers'`, and `'something funny for family movie night'` gracefully.",
     ])
 
-    DOCS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(DOCS_FILE, "w", encoding="utf-8") as f:
+    tmp_docs = tmp_path / "agent_evals.md"
+    with open(tmp_docs, "w", encoding="utf-8") as f:
         f.write("\n".join(md_lines) + "\n")
 
     assert fb_eval["pass_rate_pct"] == 100.0, f"Expected 100% fallback pass rate, got {fb_eval['pass_rate_pct']}%"

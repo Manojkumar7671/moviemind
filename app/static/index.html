@@ -275,6 +275,7 @@
                   <th>Hit@20</th>
                   <th>Hits (N=500)</th>
                   <th>95% Wilson CI</th>
+                  <th>Diff vs Best In-Pool</th>
                 </tr>
               </thead>
               <tbody id="worldEvalTbody">
@@ -284,6 +285,7 @@
                   <td id="tableWorldRecHit">5.20%</td>
                   <td id="tableWorldRecHits">26 / 500</td>
                   <td id="tableWorldRecCI">[3.57%, 7.51%]</td>
+                  <td id="tableWorldRecDiff" style="font-weight:700; color:var(--retro);">+2.80%</td>
                 </tr>
                 <tr>
                   <td><strong>In-Pool Random Baseline</strong></td>
@@ -291,6 +293,7 @@
                   <td id="tableWorldPoolRandHit">2.40%</td>
                   <td id="tableWorldPoolRandHits">12 / 500</td>
                   <td id="tableWorldPoolRandCI">[1.38%, 4.15%]</td>
+                  <td id="tableWorldPoolRandDiff">0.00% (reference)</td>
                 </tr>
                 <tr>
                   <td><strong>In-Pool Most-Votes Baseline</strong></td>
@@ -298,20 +301,15 @@
                   <td id="tableWorldPoolPopHit">1.60%</td>
                   <td id="tableWorldPoolPopHits">8 / 500</td>
                   <td id="tableWorldPoolPopCI">[0.81%, 3.13%]</td>
+                  <td id="tableWorldPoolPopDiff">-0.80%</td>
                 </tr>
                 <tr>
-                  <td><strong>Global Most-Votes Baseline (Unconditioned)</strong></td>
-                  <td>Full catalog (unconditioned)</td>
-                  <td id="tableWorldPopHit">0.00%</td>
-                  <td id="tableWorldPopHits">0 / 500</td>
-                  <td id="tableWorldPopCI">[0.00%, 0.76%]</td>
-                </tr>
-                <tr>
-                  <td><strong>Global Random Baseline (Unconditioned)</strong></td>
+                  <td><strong>Global Random Baseline (Context)</strong></td>
                   <td>Full catalog (unconditioned)</td>
                   <td id="tableWorldRandHit">0.00%</td>
                   <td id="tableWorldRandHits">0 / 500</td>
                   <td id="tableWorldRandCI">[0.00%, 0.76%]</td>
+                  <td id="tableWorldRandDiff">-2.40%</td>
                 </tr>
               </tbody>
             </table>

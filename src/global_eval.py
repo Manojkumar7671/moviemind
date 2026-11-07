@@ -195,6 +195,13 @@ def run_global_evaluation(
     lift_over_random = round(rec_hit_rate - rand_hit_rate, 4)
     lift_over_popularity = round(rec_hit_rate - pop_hit_rate, 4)
 
+    # 4-System Fair Comparison vs Best In-Pool Baseline
+    best_pool_baseline = max(pool_rand_hit_rate, pool_pop_hit_rate)
+    rec_diff_vs_best_pool = round(rec_hit_rate - best_pool_baseline, 4)
+    pool_rand_diff_vs_best_pool = round(pool_rand_hit_rate - best_pool_baseline, 4)
+    pool_pop_diff_vs_best_pool = round(pool_pop_hit_rate - best_pool_baseline, 4)
+    rand_diff_vs_best_pool = round(rand_hit_rate - best_pool_baseline, 4)
+
     results = {
         "n_samples": actual_n,
         "seed": seed,
@@ -203,22 +210,27 @@ def run_global_evaluation(
         "recommender_hits": hits_rec,
         "recommender_ci95": [rec_ci["lower"], rec_ci["upper"]],
         "recommender_ci95_str": rec_ci["str"],
+        "recommender_diff_vs_best_pool": rec_diff_vs_best_pool,
         "pool_random_hit20": pool_rand_hit_rate,
         "pool_random_hits": hits_pool_rand,
         "pool_random_ci95": [pool_rand_ci["lower"], pool_rand_ci["upper"]],
         "pool_random_ci95_str": pool_rand_ci["str"],
+        "pool_random_diff_vs_best_pool": pool_rand_diff_vs_best_pool,
         "pool_popularity_hit20": pool_pop_hit_rate,
         "pool_popularity_hits": hits_pool_pop,
         "pool_popularity_ci95": [pool_pop_ci["lower"], pool_pop_ci["upper"]],
         "pool_popularity_ci95_str": pool_pop_ci["str"],
+        "pool_popularity_diff_vs_best_pool": pool_pop_diff_vs_best_pool,
         "random_hit20": rand_hit_rate,
         "random_hits": hits_rand,
         "random_ci95": [rand_ci["lower"], rand_ci["upper"]],
         "random_ci95_str": rand_ci["str"],
+        "random_diff_vs_best_pool": rand_diff_vs_best_pool,
         "popularity_hit20": pop_hit_rate,
         "popularity_hits": hits_pop,
         "popularity_ci95": [pop_ci["lower"], pop_ci["upper"]],
         "popularity_ci95_str": pop_ci["str"],
+        "best_in_pool_baseline_hit20": best_pool_baseline,
         "lift_over_random": lift_over_random,
         "lift_over_popularity": lift_over_popularity,
         "honesty_disclaimer": (
@@ -256,19 +268,18 @@ For each target film $T$:
 4. Define the candidate pool: all films sharing $\\ge 1$ genre and $\\ge 1$ language with $A$ or $B$, excluding $A$ and $B$.
 5. A **Hit** is scored if target film $T$ appears in the top-20 recommendations ($K=20$).
 
-## Results Comparison
+## Results Comparison (4 Systems)
 
-| Model / Pipeline | Candidate Pool | Hit@20 | Hits ({actual_n} targets) | 95% Wilson CI |
-| :--- | :--- | :---: | :---: | :---: |
-| **MovieMind Content Recommender (TF-IDF + Prior + MMR $\\lambda=0.7$)** | Full Catalog (profile-guided) | **{rec_hit_rate * 100:.2f}%** | **{hits_rec}** | **{rec_ci['str']}** |
-| **In-Pool Random Baseline** | Same Candidate Pool (shared genre & lang) | {pool_rand_hit_rate * 100:.2f}% | {hits_pool_rand} | {pool_rand_ci['str']} |
-| **In-Pool Most-Votes Baseline** | Same Candidate Pool (shared genre & lang) | {pool_pop_hit_rate * 100:.2f}% | {hits_pool_pop} | {pool_pop_ci['str']} |
-| **Global Most-Votes Baseline (Unconditioned)** | Full Catalog (unconditioned) | {pop_hit_rate * 100:.2f}% | {hits_pop} | {pop_ci['str']} |
-| **Global Random Baseline (Unconditioned)** | Full Catalog (unconditioned) | {rand_hit_rate * 100:.2f}% | {hits_rand} | {rand_ci['str']} |
+| Model / Pipeline | Candidate Pool | Hit@20 | Hits ({actual_n} targets) | 95% Wilson CI | Diff vs Best In-Pool |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **MovieMind Content Recommender (TF-IDF + Prior + MMR $\\lambda=0.7$)** | Full Catalog (profile-guided) | **{rec_hit_rate * 100:.2f}%** | **{hits_rec}** | **{rec_ci['str']}** | **+{rec_diff_vs_best_pool * 100:.2f}%** |
+| **In-Pool Random Baseline** | Same Candidate Pool (shared genre & lang) | {pool_rand_hit_rate * 100:.2f}% | {hits_pool_rand} | {pool_rand_ci['str']} | {pool_rand_diff_vs_best_pool * 100:.2f}% (reference) |
+| **In-Pool Most-Votes Baseline** | Same Candidate Pool (shared genre & lang) | {pool_pop_hit_rate * 100:.2f}% | {hits_pool_pop} | {pool_pop_ci['str']} | {pool_pop_diff_vs_best_pool * 100:.2f}% |
+| **Global Random Baseline (Context)** | Full Catalog (unconditioned) | {rand_hit_rate * 100:.2f}% | {hits_rand} | {rand_ci['str']} | {rand_diff_vs_best_pool * 100:.2f}% |
 
 ### Fair Comparison Notes
 - **Candidate Pool Fairness**: Because target films share attributes (genre and language) with the conditioning films by construction, comparing against unconditioned global baselines (which sample across all {n_items:,} films without knowing the conditioned attributes) produces an uninformative 0.00% hit rate. Claims of lift over unconditioned baselines have been removed.
-- **In-Pool Performance**: Within the exact candidate pool of films matching the conditioning attributes (mean pool size $\\sim 10,360$ films), the content recommender achieves **{rec_hit_rate * 100:.2f}% Hit@20** (95% CI: {rec_ci['str']}), significantly exceeding the in-pool most-votes baseline (**{pool_pop_hit_rate * 100:.2f}%**, 95% CI: {pool_pop_ci['str']}) and the in-pool random baseline (**{pool_rand_hit_rate * 100:.2f}%**, 95% CI: {pool_rand_ci['str']}).
+- **In-Pool Performance**: Within the exact candidate pool of films matching the conditioning attributes (mean pool size $\\sim 10,360$ films), the content recommender achieves **{rec_hit_rate * 100:.2f}% Hit@20** (95% CI: {rec_ci['str']}), exceeding the in-pool most-votes baseline (**{pool_pop_hit_rate * 100:.2f}%**, 95% CI: {pool_pop_ci['str']}) and the in-pool random baseline (**{pool_rand_hit_rate * 100:.2f}%**, 95% CI: {pool_rand_ci['str']}).
 
 ## Honest Limitations
 1. **Attribute-Conditioned Retrieval Benchmark**: The target film shares attributes with the liked films by construction. This is a content-similarity retrieval sanity check, not evidence of real-world user satisfaction.
