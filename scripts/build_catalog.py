@@ -2,6 +2,7 @@
 
 Filters: titleType=movie, numVotes>=2000, valid startYear.
 Origin and language metadata sourced from Wikidata (CC0).
+All countries and languages are stored as full lists (no primary country/language column).
 Output: artifacts/global_catalog.parquet (<50 MB).
 """
 
@@ -13,7 +14,7 @@ import logging
 import sys
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -106,31 +107,27 @@ def build_catalog(
     else:
         logger.warning(f"Wikidata cache not found at {CACHE_PATH}!")
 
-    # 5. Build final catalog records with honest Unknowns
+    # 5. Build final catalog records with all countries and languages
     records = []
     for mid, m in movies.items():
         wdata = wikidata_data.get(mid, {})
         countries = list(wdata.get("countries", []))
+        country_names = list(wdata.get("country_labels", []))
         languages = list(wdata.get("languages", []))
-        country_labels = list(wdata.get("country_labels", []))
-        language_labels = list(wdata.get("language_labels", []))
-
-        origin_primary = countries[0] if countries else "Unknown"
-        language_primary = languages[0] if languages else "Unknown"
+        language_names = list(wdata.get("language_labels", []))
 
         records.append({
             "id": mid,
+            "imdb_id": mid,
             "title": m["title"],
             "year": m["year"],
             "genres": m["genres"],
             "rating": m["rating"],
             "votes": m["votes"],
             "origin_countries": countries,
+            "origin_country_names": country_names,
             "original_languages": languages,
-            "origin_primary": origin_primary,
-            "language_primary": language_primary,
-            "country_labels": country_labels,
-            "language_labels": language_labels,
+            "original_language_names": language_names,
         })
 
     df = pd.DataFrame(records)
@@ -144,18 +141,20 @@ def build_catalog(
     # Coverage statistics
     total = len(df)
     n_countries = (df["origin_countries"].apply(len) > 0).sum()
+    n_country_names = (df["origin_country_names"].apply(len) > 0).sum()
     n_languages = (df["original_languages"].apply(len) > 0).sum()
-    n_unknown_origin = (df["origin_primary"] == "Unknown").sum()
-    n_unknown_lang = (df["language_primary"] == "Unknown").sum()
+    n_lang_names = (df["original_language_names"].apply(len) > 0).sum()
+    n_empty_origin = (df["origin_countries"].apply(len) == 0).sum()
+    n_empty_lang = (df["original_languages"].apply(len) == 0).sum()
 
     print("\n=== Catalog Coverage Report ===")
-    print(f"Total films:               {total:,}")
-    print(f"origin_countries >= 1:     {n_countries:,} ({n_countries / total * 100:.2f}%)")
-    print(f"original_languages >= 1:   {n_languages:,} ({n_languages / total * 100:.2f}%)")
-    print(f"origin_primary Unknown:    {n_unknown_origin:,} ({n_unknown_origin / total * 100:.2f}%)")
-    print(f"language_primary Unknown:  {n_unknown_lang:,} ({n_unknown_lang / total * 100:.2f}%)")
-    print("\nTop 10 origin_primary countries:")
-    print(df["origin_primary"].value_counts().head(10).to_string())
+    print(f"Total films:                     {total:,}")
+    print(f"origin_countries (>= 1):         {n_countries:,} ({n_countries / total * 100:.2f}%)")
+    print(f"origin_country_names (>= 1):     {n_country_names:,} ({n_country_names / total * 100:.2f}%)")
+    print(f"original_languages (>= 1):       {n_languages:,} ({n_languages / total * 100:.2f}%)")
+    print(f"original_language_names (>= 1): {n_lang_names:,} ({n_lang_names / total * 100:.2f}%)")
+    print(f"Empty origin_countries:          {n_empty_origin:,} ({n_empty_origin / total * 100:.2f}%)")
+    print(f"Empty original_languages:        {n_empty_lang:,} ({n_empty_lang / total * 100:.2f}%)")
     print("===============================\n")
 
     return output_path
