@@ -905,17 +905,41 @@ async function loadEvaluationData() {
       if (elH20 && w.recommender_hit20 !== undefined) {
         elH20.innerText = `${(w.recommender_hit20 * 100).toFixed(2)}%`;
       }
+      const elH20CI = document.getElementById('worldHit20CI');
+      if (elH20CI && w.recommender_ci95_str) {
+        elH20CI.innerText = `95% CI: ${w.recommender_ci95_str}`;
+      }
       const elRecBox = document.getElementById('worldRecHitBox');
       if (elRecBox && w.recommender_hit20 !== undefined) {
         elRecBox.innerText = `${(w.recommender_hit20 * 100).toFixed(2)}%`;
       }
-      const elRandBox = document.getElementById('worldRandHitBox');
-      if (elRandBox && w.random_hit20 !== undefined) {
-        elRandBox.innerText = `${(w.random_hit20 * 100).toFixed(2)}%`;
+      const elRecSub = document.getElementById('worldRecSub');
+      if (elRecSub && w.recommender_hits !== undefined) {
+        elRecSub.innerText = `${w.recommender_hits} hits / ${w.n_samples || 500} • 95% CI: ${w.recommender_ci95_str || ''}`;
+      }
+      const elPoolRandBox = document.getElementById('worldPoolRandHitBox');
+      if (elPoolRandBox && w.pool_random_hit20 !== undefined) {
+        elPoolRandBox.innerText = `${(w.pool_random_hit20 * 100).toFixed(2)}%`;
+      }
+      const elPoolRandSub = document.getElementById('worldPoolRandSub');
+      if (elPoolRandSub && w.pool_random_hits !== undefined) {
+        elPoolRandSub.innerText = `${w.pool_random_hits} hits / ${w.n_samples || 500} • 95% CI: ${w.pool_random_ci95_str || ''}`;
+      }
+      const elPoolPopBox = document.getElementById('worldPoolPopHitBox');
+      if (elPoolPopBox && w.pool_popularity_hit20 !== undefined) {
+        elPoolPopBox.innerText = `${(w.pool_popularity_hit20 * 100).toFixed(2)}%`;
+      }
+      const elPoolPopSub = document.getElementById('worldPoolPopSub');
+      if (elPoolPopSub && w.pool_popularity_hits !== undefined) {
+        elPoolPopSub.innerText = `${w.pool_popularity_hits} hits / ${w.n_samples || 500} • 95% CI: ${w.pool_popularity_ci95_str || ''}`;
       }
       const elPopBox = document.getElementById('worldPopHitBox');
       if (elPopBox && w.popularity_hit20 !== undefined) {
         elPopBox.innerText = `${(w.popularity_hit20 * 100).toFixed(2)}%`;
+      }
+      const elPopSub = document.getElementById('worldPopSub');
+      if (elPopSub && w.popularity_hits !== undefined) {
+        elPopSub.innerText = `${w.popularity_hits} hits / ${w.n_samples || 500} • 95% CI: ${w.popularity_ci95_str || ''}`;
       }
     }
   } catch (err) {
