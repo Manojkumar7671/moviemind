@@ -390,8 +390,15 @@ function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false, t
     const mmrMs = (latency?.mmr ?? 0.2).toFixed(2);
     const totMs = (latency?.total ?? (parseFloat(retMs) + parseFloat(rkMs) + parseFloat(mmrMs))).toFixed(2);
 
-    const regionBadge = movie.approx_origin_region ? 
-      `<span class="card-origin-region-label" title="Approximate origin region based on original release title in IMDb akas">Approx. origin: ${movie.approx_origin_region}</span>` : '';
+    const originNames = (movie.origin_country_names && movie.origin_country_names.length > 0)
+      ? movie.origin_country_names.join(', ')
+      : (movie.origin || 'unknown');
+    const langNames = (movie.original_language_names && movie.original_language_names.length > 0)
+      ? movie.original_language_names.join(', ')
+      : (movie.language_names_str || '');
+
+    const originBadge = `<span class="card-origin-region-label" title="${originNames}">Origin: ${originNames}</span>`;
+    const langChipHtml = langNames ? `<span class="genre-tag language-tag" title="Original language">${langNames}</span>` : '';
 
     let traceStepsHtml = '';
     if (trace && trace.length > 0) {
@@ -419,12 +426,12 @@ function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false, t
         ${generatePosterSvg(movie.title, movie.year, primaryGenre, movie.movie_id)}
         <div class="poster-content">
           <div class="poster-header">
-            <span class="poster-year">${movie.year}${regionBadge}</span>
+            <span class="poster-year">${movie.year} • ${originBadge}</span>
             <span class="poster-match-badge">${movie.match_pct}% Relative match</span>
           </div>
           <div class="poster-title-area">
             <h3 class="poster-title">${movie.title}</h3>
-            <div class="poster-genres-row">${genresHtml}</div>
+            <div class="poster-genres-row">${genresHtml}${langChipHtml}</div>
           </div>
         </div>
       </div>
@@ -480,8 +487,11 @@ async function loadWorldMeta() {
     if (regSel && regSel.options.length <= 1) {
       meta.regions.forEach(r => {
         const opt = document.createElement('option');
-        opt.value = r;
-        opt.textContent = r;
+        const code = (typeof r === 'object' && r.code) ? r.code : r;
+        const name = (typeof r === 'object' && r.name) ? r.name : code;
+        const count = (typeof r === 'object' && r.count !== undefined) ? ` (${r.count.toLocaleString()})` : '';
+        opt.value = code;
+        opt.textContent = `${name}${count}`;
         regSel.appendChild(opt);
       });
     }
@@ -490,8 +500,11 @@ async function loadWorldMeta() {
     if (langSel && langSel.options.length <= 1) {
       meta.languages.forEach(l => {
         const opt = document.createElement('option');
-        opt.value = l;
-        opt.textContent = l;
+        const code = (typeof l === 'object' && l.code) ? l.code : l;
+        const name = (typeof l === 'object' && l.name) ? l.name : code;
+        const count = (typeof l === 'object' && l.count !== undefined) ? ` (${l.count.toLocaleString()})` : '';
+        opt.value = code;
+        opt.textContent = `${name}${count}`;
         langSel.appendChild(opt);
       });
     }
@@ -886,19 +899,23 @@ async function loadEvaluationData() {
     }
 
     // World Cinema Content Evaluation
-    if (data.world_cinema_eval && data.world_cinema_eval.metrics) {
-      const m = data.world_cinema_eval.metrics;
-      const elH10 = document.getElementById('worldHit10');
-      if (elH10 && m.content_plus_mmr_top10) {
-        elH10.innerText = `${(m.content_plus_mmr_top10.hit_rate_10 * 100).toFixed(1)}%`;
+    if (data.world_cinema_eval) {
+      const w = data.world_cinema_eval;
+      const elH20 = document.getElementById('worldHit20');
+      if (elH20 && w.recommender_hit20 !== undefined) {
+        elH20.innerText = `${(w.recommender_hit20 * 100).toFixed(2)}%`;
       }
-      const elGen = document.getElementById('worldGenreOverlap');
-      if (elGen && m.alignment) {
-        elGen.innerText = `${(m.alignment.genre_overlap_consistency_10 * 100).toFixed(1)}%`;
+      const elRecBox = document.getElementById('worldRecHitBox');
+      if (elRecBox && w.recommender_hit20 !== undefined) {
+        elRecBox.innerText = `${(w.recommender_hit20 * 100).toFixed(2)}%`;
       }
-      const elReg = document.getElementById('worldRegionConsistency');
-      if (elReg && m.alignment) {
-        elReg.innerText = `${(m.alignment.origin_region_consistency_10 * 100).toFixed(1)}%`;
+      const elRandBox = document.getElementById('worldRandHitBox');
+      if (elRandBox && w.random_hit20 !== undefined) {
+        elRandBox.innerText = `${(w.random_hit20 * 100).toFixed(2)}%`;
+      }
+      const elPopBox = document.getElementById('worldPopHitBox');
+      if (elPopBox && w.popularity_hit20 !== undefined) {
+        elPopBox.innerText = `${(w.popularity_hit20 * 100).toFixed(2)}%`;
       }
     }
   } catch (err) {
