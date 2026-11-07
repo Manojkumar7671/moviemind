@@ -770,5 +770,121 @@
     "expected_args": {},
     "adversarial": false,
     "description": "Held-out ambiguous: decade and mood phrasing"
+  },
+  {
+    "id": "regression_best_movies",
+    "split": "dev",
+    "category": "recommend",
+    "message": "best movies",
+    "expected_tool": "recommend",
+    "acceptable_tools": [
+      "recommend"
+    ],
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Regression test: intent words route to recommend"
+  },
+  {
+    "id": "regression_top_rated",
+    "split": "dev",
+    "category": "recommend",
+    "message": "top rated",
+    "expected_tool": "recommend",
+    "acceptable_tools": [
+      "recommend"
+    ],
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Regression test: top rated intent routes to recommend"
+  },
+  {
+    "id": "regression_bounds_2026",
+    "split": "dev",
+    "category": "adversarial",
+    "message": "2026",
+    "expected_tool": null,
+    "acceptable_tools": [
+      null
+    ],
+    "expected_args": {},
+    "adversarial": true,
+    "description": "Regression test: bare out-of-bounds year handled with honest bounds message"
+  },
+  {
+    "id": "regression_bounds_movies_in_2026",
+    "split": "dev",
+    "category": "adversarial",
+    "message": "movies in 2026",
+    "expected_tool": null,
+    "acceptable_tools": [
+      null
+    ],
+    "expected_args": {},
+    "adversarial": true,
+    "description": "Regression test: out-of-bounds year phrase handled with honest bounds message"
+  },
+  {
+    "id": "regression_filter_1995",
+    "split": "dev",
+    "category": "filter",
+    "message": "movies from 1995",
+    "expected_tool": "filter_movies",
+    "acceptable_tools": [
+      "filter_movies"
+    ],
+    "expected_args": {
+      "year": 1995
+    },
+    "adversarial": false,
+    "description": "Regression test: in-bounds year routes to filter_movies"
+  },
+  {
+    "id": "regression_good_comedy",
+    "split": "dev",
+    "category": "recommend",
+    "message": "good comedy",
+    "expected_tool": "recommend",
+    "acceptable_tools": [
+      "recommend",
+      "filter_movies"
+    ],
+    "expected_args": {
+      "genres": [
+        "Comedy"
+      ]
+    },
+    "adversarial": false,
+    "description": "Regression test: genre recommendation intent routes to recommend"
+  },
+  {
+    "id": "regression_telugu_2015",
+    "split": "dev",
+    "category": "filter",
+    "message": "telugu movies from 2015",
+    "expected_tool": "filter_movies",
+    "acceptable_tools": [
+      "filter_movies"
+    ],
+    "expected_args": {
+      "language": "te",
+      "year": 2015
+    },
+    "adversarial": false,
+    "description": "Regression test: language and modern year route to world catalog filter"
+  },
+  {
+    "id": "regression_korean_thrillers",
+    "split": "dev",
+    "category": "filter",
+    "message": "korean thrillers",
+    "expected_tool": "filter_movies",
+    "acceptable_tools": [
+      "filter_movies"
+    ],
+    "expected_args": {
+      "genre": "Thriller"
+    },
+    "adversarial": false,
+    "description": "Regression test: demonym region and genre route to world catalog filter"
   }
 ]

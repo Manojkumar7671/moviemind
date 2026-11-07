@@ -81,6 +81,18 @@ class MovieMindAgent:
         else:
             self.data_min_year = self.ml_min_year
             self.data_max_year = self.ml_max_year
+
+        # Common country demonyms
+        demonyms = {
+            "indian": "IN", "american": "US", "british": "GB", "french": "FR",
+            "german": "DE", "italian": "IT", "japanese": "JP", "korean": "KR",
+            "spanish": "ES", "chinese": "CN", "canadian": "CA", "australian": "AU",
+            "mexican": "MX", "brazilian": "BR", "swedish": "SE", "danish": "DK",
+            "norwegian": "NO", "russian": "RU", "polish": "PL"
+        }
+        for d_name, d_code in demonyms.items():
+            if d_name not in self.region_name_to_code:
+                self.region_name_to_code[d_name] = d_code
         for a, mid in {
             "matrix": 2571, "aliens": 1200, "alien": 1214, "godfather": 858,
             "star wars": 260, "toy story": 1, "jurassic park": 480,
@@ -988,8 +1000,8 @@ class MovieMindAgent:
                 "is_adversarial": False,
             }
 
-        # Intent 5: Filter queries
-        year_match = re.search(r"\b(19\d{2}|20\d{2})\b", low)
+        # Intent 5: Region / Language / Year / Genre Filter queries
+        year_match = re.search(r"\b(18\d{2}|19\d{2}|20\d{2})\b", low)
         decade_match = re.search(r"\b(\d{2})s\b", low)
         all_genres = ["Action", "Adventure", "Animation", "Children's", "Comedy", "Crime", "Documentary", "Drama", "Fantasy", "Film-Noir", "Horror", "Musical", "Mystery", "Romance", "Sci-Fi", "Thriller", "War", "Western"]
         genre_synonyms = {
@@ -1007,7 +1019,7 @@ class MovieMindAgent:
         matched_region = None
         matched_language = None
 
-        # Data-driven region and language matching from catalog labels
+        # Data-driven region and language matching from catalog labels & demonyms
         for name_key in sorted(self.region_name_to_code.keys(), key=len, reverse=True):
             if len(name_key) >= 3 and re.search(rf"\b{re.escape(name_key)}\b", low):
                 matched_region = self.region_name_to_code[name_key]
@@ -1027,6 +1039,43 @@ class MovieMindAgent:
             code_candidate = lang_code_match.group(1).lower()
             matched_language = self.lang_name_to_code.get(code_candidate, code_candidate)
 
+        # Catalog-driven year boundary check: out-of-bounds queries for MovieLens 1M
+        is_bare_year = bool(re.fullmatch(r"^(18\d{2}|19\d{2}|20\d{2})$", low.strip()))
+        is_year_phrase = bool(year_match and any(w in low for w in ("from", "in ", "released", "movies", "films", "before", "after", "since")))
+        if (is_bare_year or is_year_phrase) and not matched_region and not matched_language:
+            yr = int(year_match.group(1))
+            # Distinguish from titled films containing numbers (e.g. '2001: A Space Odyssey')
+            has_title_with_year = False
+            for t in self.title_map:
+                if str(yr) in t and len(t) > 6 and t in low:
+                    has_title_with_year = True
+                    break
+            if not has_title_with_year:
+                if yr < self.ml_min_year or yr > self.ml_max_year:
+                    return {
+                        "tool": None,
+                        "args": {},
+                        "result": {},
+                        "response": f"MovieLens 1M covers {self.ml_min_year}-{self.ml_max_year}. Try a year in that range.",
+                        "safe": True,
+                        "is_adversarial": True,
+                    }
+
+        # Intent 6: Recommendation queries (intent words: best, top, good, popular, recommend, etc. with no title)
+        rec_cues = (
+            "recommend", "recommendation", "recommendations", "suggest", "suggestions",
+            "what should i watch", "what to watch", "pick", "picks", "something like",
+            "more like", "best movies", "best film", "best", "top rated", "top movies",
+            "good comedy", "good horror", "good action", "good drama", "good movies", "good movie",
+            "popular movies", "something to watch", "for family"
+        )
+        is_rec_intent = any(re.search(rf"\b{re.escape(w)}\b", low) for w in rec_cues) or bool(re.search(r"\bgive me\s+(\d+\s+)?([a-z\s-]+\s+)?movies?\b", low))
+        
+        # Check if explicit search verb is present (e.g. 'search for', 'find', 'look up')
+        explicit_search_verbs = ("search for", "find ", "look up ", "tell me about ", "do you have ")
+        has_explicit_search_verb = any(v in low for v in explicit_search_verbs)
+
+        # Year and filter triggers
         is_filter_trigger = (
             "filter" in low
             or matched_region is not None
@@ -1036,7 +1085,7 @@ class MovieMindAgent:
             or ("newer" in low and ("than" in low or "like" in low))
         )
 
-        if is_filter_trigger:
+        if is_filter_trigger and not (is_rec_intent and not matched_region and not matched_language and not year_match and not decade_match):
             min_y, max_y, exact_year = None, None, None
             if decade_match:
                 d_val = int(decade_match.group(1))
@@ -1046,7 +1095,7 @@ class MovieMindAgent:
                 yr = int(year_match.group(1))
                 min_y = yr if any(w in low for w in ("after", "since")) else None
                 max_y = yr if "before" in low else None
-                if ("from" in low or "released" in low or "in " in low or matched_region or matched_genre) and yr and not min_y and not max_y:
+                if ("from" in low or "released" in low or "in " in low or matched_region or matched_genre or is_bare_year) and yr and not min_y and not max_y:
                     min_y, max_y, exact_year = yr, yr, yr
             elif "newer" in low:
                 ref_mid = self.find_movie_id_in_text(low)
@@ -1086,13 +1135,8 @@ class MovieMindAgent:
                 "is_adversarial": False,
             }
 
-        # Intent 6: Explicit Recommendation queries
-        is_rec_intent = (
-            any(w in low for w in ("recommend", "recommendation", "recommendations", "suggest", "suggestions", "what should i watch", "what to watch", "pick", "picks", "something like", "more like"))
-            or bool(re.search(r"\bgive me\s+(\d+\s+)?([a-z\s-]+\s+)?movies?\b", low))
-            or any(k in low for k in ("funny", "space movies", "detective stories", "for family"))
-        )
-        if is_rec_intent:
+        # Intent 6: Recommendation queries (if not intercepted by search)
+        if is_rec_intent and not has_explicit_search_verb:
             n_match = re.search(r"\b(\d+)\b", low)
             word_num_map = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
             if n_match:
@@ -1179,6 +1223,32 @@ class MovieMindAgent:
                 "is_adversarial": True,
             }
 
+        # Catalog-driven year bounds guard for MovieLens catalog
+        year_match = re.search(r"\b(18\d{2}|19\d{2}|20\d{2})\b", low)
+        has_region_or_lang = bool(
+            any(k in low for k in self.region_name_to_code if len(k) >= 3)
+            or any(k in low for k in self.lang_name_to_code if len(k) >= 3)
+        )
+        is_bare_year = bool(re.fullmatch(r"^(18\d{2}|19\d{2}|20\d{2})$", low.strip()))
+        is_year_phrase = bool(year_match and any(w in low for w in ("from", "in ", "released", "movies", "films", "before", "after", "since")))
+        if (is_bare_year or is_year_phrase) and year_match and not has_region_or_lang:
+            yr = int(year_match.group(1))
+            is_known_non_bare_title = False
+            for t in self.title_map:
+                if str(yr) in t and len(t) > 6 and t in low:
+                    is_known_non_bare_title = True
+                    break
+            if not is_known_non_bare_title:
+                if yr < self.ml_min_year or yr > self.ml_max_year:
+                    return {
+                        "tool": None,
+                        "args": {},
+                        "result": {},
+                        "response": f"MovieLens 1M covers {self.ml_min_year}-{self.ml_max_year}. Try a year in that range.",
+                        "safe": True,
+                        "is_adversarial": True,
+                    }
+
         try:
             messages = [
                 {
@@ -1187,6 +1257,9 @@ class MovieMindAgent:
                         "You are MovieMind, an expert, charming movie recommender assistant for the MovieLens 1M catalog. "
                         "You must choose the single best tool to satisfy the user request: "
                         "search_movies, recommend, explain, filter_movies, record_feedback, get_taste_profile. "
+                        "For intent requests like 'best movies', 'top rated', 'good movies', or 'recommend me something' without a specific movie title, choose recommend. "
+                        "For region or language queries (e.g. 'telugu movies from 2015', 'korean thrillers'), choose filter_movies with region/language. "
+                        "The MovieLens 1M catalog covers release years 1919-2000. If the user asks for a year outside 1919-2000 without a foreign region/language, respond directly stating 'MovieLens 1M covers 1919-2000. Try a year in that range.' with no tools. "
                         "For typos in movie titles (e.g. 'alines' -> 'Aliens'), correct the title in tool arguments. "
                         "For similarity or 'something like X' requests, choose recommend or filter_movies. "
                         "Only use record_feedback when user explicitly states they like/love or dislike/hate a movie. "
@@ -1237,6 +1310,13 @@ class MovieMindAgent:
                 "war": "War", "western": "Western"
             }
 
+            # If search_movies was called on a generic intent phrase rather than a title
+            if fn_name == "search_movies":
+                sq = fn_args.get("query", "").lower().strip()
+                if sq in ("best", "top", "top rated", "good", "popular", "best movies", "top movies", "good movies", "recommend me something"):
+                    fn_name = "recommend"
+                    fn_args = {"user_id": user_id, "genres": None, "n": 5}
+
             if fn_name == "recommend":
                 if "genres" in fn_args and isinstance(fn_args["genres"], list):
                     fn_args["genres"] = [
@@ -1250,6 +1330,12 @@ class MovieMindAgent:
                     fn_args.setdefault("max_year", fn_args["year"])
                 if "genre" in fn_args and isinstance(fn_args["genre"], str):
                     fn_args["genre"] = canonical_genres.get(fn_args["genre"].strip().lower(), fn_args["genre"])
+                if "region" in fn_args and isinstance(fn_args["region"], str):
+                    r_raw = fn_args["region"].strip().lower()
+                    fn_args["region"] = self.region_name_to_code.get(r_raw, fn_args["region"].upper())
+                if "language" in fn_args and isinstance(fn_args["language"], str):
+                    l_raw = fn_args["language"].strip().lower()
+                    fn_args["language"] = self.lang_name_to_code.get(l_raw, l_raw)
 
             if fn_name in ("explain", "record_feedback"):
                 if "movie_id" not in fn_args or fn_args["movie_id"] is None:
