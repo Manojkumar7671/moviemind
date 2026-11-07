@@ -4,14 +4,21 @@
   "passed": 15,
   "pass_rate_pct": 100.0,
   "fallback_pass_rate_pct": 100.0,
-  "llm_pass_rate_pct": 100.0,
-  "differing_categories": [],
+  "llm_pass_rate_pct": 93.33,
+  "differing_categories": [
+    {
+      "category": "recommend",
+      "llm_pass_rate_pct": 50.0,
+      "fallback_pass_rate_pct": 100.0,
+      "delta_pct": -50.0
+    }
+  ],
   "adversarial_passed": 2,
   "adversarial_total": 2,
   "llm_agent": {
     "total": 15,
-    "passed": 15,
-    "pass_rate_pct": 100.0,
+    "passed": 14,
+    "pass_rate_pct": 93.33,
     "categories": {
       "search": {
         "total": 3,
@@ -20,8 +27,8 @@
       },
       "recommend": {
         "total": 2,
-        "passed": 2,
-        "pass_rate_pct": 100.0
+        "passed": 1,
+        "pass_rate_pct": 50.0
       },
       "explain": {
         "total": 2,
