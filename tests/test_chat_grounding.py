@@ -1,5 +1,11 @@
+import sys
+import os
+from pathlib import Path
 import pytest
 from unittest.mock import MagicMock
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from src.agent import MovieMindAgent
 
 class MockChoice:
