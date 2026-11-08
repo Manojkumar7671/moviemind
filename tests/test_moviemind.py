@@ -428,3 +428,22 @@ def test_api_input_validation():
     # 5. GET /api/global/recommend with year_min > year_max
     res = client.get("/api/global/recommend?year_min=2020&year_max=1990")
     assert res.status_code == 400
+
+# 17. Test: Different liked films produce different recommendation lists
+def test_different_liked_films_produce_different_recommendations():
+    from src.agent import MovieMindAgent
+    agent = MovieMindAgent()
+    user_a = "user_toy_story_test"
+    user_b = "user_pulp_fiction_test"
+
+    agent.memory.record_feedback(user_a, 1, "like")     # Toy Story (1995)
+    agent.memory.record_feedback(user_b, 296, "like")   # Pulp Fiction (1994)
+
+    recs_a = [r["title"] for r in agent.recommend(user_id=user_a, n=5)]
+    recs_b = [r["title"] for r in agent.recommend(user_id=user_b, n=5)]
+
+    assert len(recs_a) == 5
+    assert len(recs_b) == 5
+    assert recs_a != recs_b, f"Expected different recommendations, but got same: {recs_a}"
+    assert "Toy Story" not in recs_a, "Liked film should be excluded from recommendations"
+    assert "Pulp Fiction" not in recs_b, "Liked film should be excluded from recommendations"

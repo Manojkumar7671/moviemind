@@ -998,5 +998,37 @@
     },
     "adversarial": false,
     "split": "dev"
+  },
+  {
+    "id": "dev_intent_movies_like_parasite",
+    "category": "recommend",
+    "message": "movies like Parasite",
+    "expected_tool": "recommend",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_intent_french_comedies",
+    "category": "filter",
+    "message": "show me french comedies",
+    "expected_tool": "filter_movies",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_intent_dislike_matrix_something_else",
+    "category": "feedback",
+    "message": "i didnt like The Matrix, give me something else",
+    "expected_tool": "record_feedback, recommend",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_intent_thanks_bye",
+    "category": "conversation",
+    "message": "thanks bye",
+    "expected_tool": null,
+    "adversarial": false,
+    "split": "dev"
   }
 ]
