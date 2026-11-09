@@ -304,8 +304,12 @@ def chat_endpoint(req: ChatRequest):
     if not trace:
         trace = [{"tool": res.get("tool"), "args": res.get("args"), "latency_ms": dur_ms}]
 
+    resp_text = (res.get("response") or "").strip()
+    if not resp_text and not cards:
+        resp_text = "I didn't catch that. Try a title, a genre, a country, a language or a year."
+
     return {
-        "response": res.get("response", ""),
+        "response": resp_text,
         "user_id": uid,
         "cards": cards,
         "latency_ms": res.get("latency_ms", {"total": dur_ms}),

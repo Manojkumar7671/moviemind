@@ -476,3 +476,119 @@ def test_no_internal_tier_jargon_in_replies(agent):
             assert jargon not in fb_res.get("response", "").lower(), f"Found jargon '{jargon}' in fallback reply for '{q}'"
             assert jargon not in llm_res.get("response", "").lower(), f"Found jargon '{jargon}' in LLM reply for '{q}'"
 
+
+# ==============================================================================
+# DEV SPLIT: Person Intent, Clean Title Miss, and Empty-Reply Guard Tests
+# ==============================================================================
+
+def test_dev_person_intent_detector(agent):
+    """Person queries: person-intent reply, 0 cards, no movie title in reply across both routers."""
+    person_queries = [
+        "rajini movies",
+        "movies with Rajinikanth",
+        "films directed by Nolan",
+        "Shah Rukh Khan films",
+        "movies starring Tom Hanks",
+        "tom cruise movies",
+    ]
+    expected_reply = (
+        "I can't search by actor or director yet, because the catalog has no cast data. "
+        "I can filter by language, country, genre and year instead, for example 'tamil action films from the 90s'."
+    )
+    unwanted_titles = ["Toy Story", "Rain", "Cruise", "Jumanji", "Grumpier Old Men", "The Matrix", "Inception"]
+
+    for q in person_queries:
+        fb_res = agent.route_message(q)
+        llm_res = agent.route_message_llm(q)
+
+        # 1. Zero cards
+        assert len(fb_res.get("cards", [])) == 0, f"Fallback router returned cards for person query '{q}'"
+        assert len(llm_res.get("cards", [])) == 0, f"LLM router returned cards for person query '{q}'"
+
+        # 2. Tool is None
+        assert fb_res.get("tool") is None, f"Fallback router called tool {fb_res.get('tool')} on '{q}'"
+        assert llm_res.get("tool") is None, f"LLM router called tool {llm_res.get('tool')} on '{q}'"
+
+        # 3. Exactly expected person reply
+        assert fb_res.get("response") == expected_reply, f"Fallback response mismatch on '{q}'"
+        assert llm_res.get("response") == expected_reply, f"LLM response mismatch on '{q}'"
+
+        # 4. No arbitrary movie titles in reply
+        for t in unwanted_titles:
+            assert t.lower() not in fb_res.get("response", "").lower()
+            assert t.lower() not in llm_res.get("response", "").lower()
+
+        # 5. Router parity
+        assert fb_res["response"] == llm_res["response"], f"Parity mismatch on '{q}'"
+        assert fb_res["cards"] == llm_res["cards"], f"Card parity mismatch on '{q}'"
+
+
+def test_dev_language_country_query_retention(agent):
+    """Language and country queries must not be intercepted by person intent."""
+    filter_queries = [
+        ("tamil movies", "ta", None),
+        ("korean films", "ko", "KR"),
+        ("hindi action movies", "hi", None),
+    ]
+    for q, exp_lang, exp_reg in filter_queries:
+        fb_res = agent.route_message(q)
+        llm_res = agent.route_message_llm(q)
+
+        assert fb_res.get("tool") == "filter_movies", f"Expected filter_movies for '{q}', got {fb_res.get('tool')}"
+        assert llm_res.get("tool") == "filter_movies", f"Expected filter_movies for '{q}', got {llm_res.get('tool')}"
+
+        fb_cards = fb_res.get("cards", [])
+        llm_cards = llm_res.get("cards", [])
+        assert len(fb_cards) >= 5, f"Expected at least 5 cards for '{q}', got {len(fb_cards)}"
+        assert len(llm_cards) >= 5, f"Expected at least 5 cards for '{q}', got {len(llm_cards)}"
+
+        fb_ids = [c.get("movie_id", c.get("id")) for c in fb_cards]
+        llm_ids = [c.get("movie_id", c.get("id")) for c in llm_cards]
+        assert fb_ids == llm_ids, f"Router card mismatch on '{q}'"
+
+        # Verify language/region properties
+        for c in fb_cards[:5]:
+            if exp_lang:
+                assert exp_lang in [str(l).lower() for l in c.get("original_languages", [])], f"{c['title']} missing language {exp_lang}"
+            if exp_reg:
+                assert exp_reg in [str(r).upper() for r in c.get("origin_countries", [])], f"{c['title']} missing region {exp_reg}"
+
+
+def test_dev_gibberish_search_honest_not_found(agent):
+    """Gibberish queries: honest not-found, clean title without raw sentence, 0 cards."""
+    q = "asdfgh qwerty movies"
+    fb_res = agent.route_message(q)
+    llm_res = agent.route_message_llm(q)
+
+    assert fb_res.get("tool") == "search_movies"
+    assert llm_res.get("tool") == "search_movies"
+
+    assert len(fb_res.get("cards", [])) == 0
+    assert len(llm_res.get("cards", [])) == 0
+
+    assert "asdfgh qwerty" in fb_res.get("response", "")
+    assert "asdfgh qwerty movies" not in fb_res.get("response", "")
+    assert "not in the MovieLens 1M catalog or the World catalog" in fb_res.get("response", "")
+
+    assert fb_res.get("response") == llm_res.get("response")
+
+
+def test_dev_empty_reply_guard():
+    """Empty router output simulates guard returning standard helpful fallback."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    import app.main as m
+
+    client = TestClient(app)
+    orig_fn = m.agent.route_message_llm
+    m.agent.route_message_llm = lambda msg, user_id="demo_user": {"response": "", "cards": []}
+    try:
+        res = client.post("/api/chat", json={"message": "hello testing empty guard"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["response"] == "I didn't catch that. Try a title, a genre, a country, a language or a year."
+        assert data["cards"] == []
+    finally:
+        m.agent.route_message_llm = orig_fn
+
+

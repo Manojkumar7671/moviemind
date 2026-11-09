@@ -59,6 +59,21 @@ GENRE_ALIASES = {
     "anime": {"genre": "Animation", "language": "ja", "note": "Mapped 'anime' to Japanese Animation"},
 }
 
+def is_gibberish(text: str) -> bool:
+    """Detect keyboard mash sequences or random nonsensical character strings."""
+    tokens = re.findall(r"[a-z]+", (text or "").lower())
+    if not tokens:
+        return True
+    kb_walks = ["asdf", "sdfg", "dfgh", "fghj", "ghjk", "hjkl", "qwerty", "werty", "erty", "zxcv", "xcvb", "cvbn"]
+    for t in tokens:
+        if any(kw in t for kw in kb_walks):
+            return True
+        if len(t) >= 5 and re.search(r"[bcdfghjklmnpqrstvwxyz]{5,}", t):
+            return True
+        if len(t) >= 4 and not re.search(r"[aeiouy]", t):
+            return True
+    return False
+
 class MovieMindAgent:
     """Tool-calling Recommender Agent with OpenRouter client and robust fallback."""
     def __init__(self, data_dir: Path = DATA_DIR, artifacts_dir: Path = ARTIFACTS_DIR):
@@ -259,6 +274,7 @@ class MovieMindAgent:
         prefixes = [
             r"^(can you\s+)?(please\s+)?(suggest|recommend|give me|show me|find)?\s*(something|movies?|films?|picks?|more)?\s*(like|similar to)\s+",
             r"^(can you\s+)?(please\s+)?(find|search for|search|look up)\s+",
+            r"^(can you\s+)?(please\s+)?(movies?\s+with|films?\s+with|movies?\s+starring|films?\s+starring|movies?\s+directed\s+by|films?\s+directed\s+by)\s+",
             r"^i want to (see|watch)\s+",
             r"^tell me about\s+",
             r"^do you have\s+",
@@ -507,21 +523,24 @@ class MovieMindAgent:
                     "global_id": None,
                 })
             elif len(clean_q.split()) <= 3:
-                close = difflib.get_close_matches(clean_q, self.title_map.keys(), n=1, cutoff=0.75)
+                close = difflib.get_close_matches(clean_q, self.title_map.keys(), n=1, cutoff=0.82)
                 if close:
-                    mid = self.title_map[close[0]]
-                    meta = self.movie_meta[mid]
-                    candidates.append({
-                        "id": int(mid),
-                        "title": clean_title(meta["title"]),
-                        "year": int(meta["year"]),
-                        "votes": 100000,
-                        "genres": parse_genres(meta.get("genres", "")),
-                        "catalog_source": "MovieLens 1M",
-                        "is_movielens": True,
-                        "ml_id": int(mid),
-                        "global_id": None,
-                    })
+                    ratio = difflib.SequenceMatcher(None, clean_q, close[0]).ratio()
+                    len_diff = abs(len(clean_q) - len(close[0]))
+                    if ratio >= 0.82 and len_diff <= 2:
+                        mid = self.title_map[close[0]]
+                        meta = self.movie_meta[mid]
+                        candidates.append({
+                            "id": int(mid),
+                            "title": clean_title(meta["title"]),
+                            "year": int(meta["year"]),
+                            "votes": 100000,
+                            "genres": parse_genres(meta.get("genres", "")),
+                            "catalog_source": "MovieLens 1M",
+                            "is_movielens": True,
+                            "ml_id": int(mid),
+                            "global_id": None,
+                        })
 
         if not candidates:
             return None
@@ -641,9 +660,14 @@ class MovieMindAgent:
             return matches
 
         # 3. Fuzzy match fallback for short typo queries in MovieLens
+        # Confident match: similarity ratio >= 0.82 and length difference <= 2
         if len(clean_q.split()) <= 3:
-            close_titles = difflib.get_close_matches(clean_q, self.title_map.keys(), n=2, cutoff=0.78)
+            close_titles = difflib.get_close_matches(clean_q, self.title_map.keys(), n=3, cutoff=0.82)
             for ct in close_titles:
+                ratio = difflib.SequenceMatcher(None, clean_q, ct).ratio()
+                len_diff = abs(len(clean_q) - len(ct))
+                if ratio < 0.82 or len_diff > 2:
+                    continue
                 mid = self.title_map[ct]
                 if mid in self.movie_meta and all(m["movie_id"] != mid for m in matches):
                     meta = self.movie_meta[mid]
@@ -1605,7 +1629,7 @@ class MovieMindAgent:
 
         # 1. Movie keywords
         movie_keywords = {
-            "movie", "movies", "film", "films", "cinema", "actor", "actress", "director", "oscar", "oscars",
+            "movie", "movies", "film", "films", "cinema", "actor", "actress", "director", "directed", "starring", "oscar", "oscars",
             "hollywood", "bollywood", "tollywood", "kollywood", "genre", "genres", "watch", "watching",
             "recommend", "recommendation", "recommendations", "suggest", "suggestion", "suggestions",
             "favorite", "favourite", "taste", "search", "find", "look up", "picks", "pick", "picked", "rate",
@@ -1667,7 +1691,7 @@ class MovieMindAgent:
             r"\b(\d+\s+times\s+\d+)\b",
         ]
         movie_cues = (
-            "movie", "movies", "film", "films", "cinema", "actor", "actress", "director", "oscar", "oscars",
+            "movie", "movies", "film", "films", "cinema", "actor", "actress", "director", "directed", "starring", "oscar", "oscars",
             "hollywood", "bollywood", "genre", "genres", "watch", "recommend", "suggest", "screening",
             "screenings", "screening room", "favorite", "favourite", "taste", "picks", "pick", "picked"
         )
@@ -1713,6 +1737,110 @@ class MovieMindAgent:
             return True
 
         return False
+
+    def detect_person_intent(self, text: str) -> Optional[str]:
+        """Detect person/cast/crew query patterns (actors, directors) in a general, data-free way."""
+        low = (text or "").lower().strip()
+        if not low:
+            return None
+        low = re.sub(r"[?!.]+$", "", low).strip()
+
+        # Conversational prefix stripping
+        low_clean = re.sub(
+            r"^(can you\s+)?(please\s+)?(suggest|recommend|give me|show me|find|search for|search|look up|tell me about|do you have|are there|any|i want to see|i want to watch|i want to|i'd like to see|i'd like to watch|i'd like)?\s*",
+            "",
+            low,
+        ).strip()
+
+        person_patterns = [
+            r"\b(?:movies?|films?|cinema)\s+(?:with|starring|featuring|by|directed\s+by)\s+([a-z\s.'-]+)$",
+            r"\b(?:directed\s+by|starring)\s+([a-z\s.'-]+)$",
+            r"^([a-z\s.'-]+?)(?:['`]s)?\s+(?:movies?|films?)$",
+            r"\b([a-z\s.'-]+?)['`]s\s+(?:movies?|films?)\b",
+        ]
+
+        candidate = None
+        for pat in person_patterns:
+            m = re.search(pat, low_clean)
+            if m:
+                candidate = m.group(1).strip()
+                break
+
+        if not candidate:
+            return None
+
+        c_low = candidate.lower().strip()
+        if not c_low or len(c_low) < 2 or len(c_low.split()) > 4:
+            return None
+
+        # Exclusions:
+        # 0. Conversational words & stopwords
+        stopwords = {
+            "add", "liked", "disliked", "favorite", "favorites", "to", "my", "me",
+            "i", "you", "he", "she", "we", "they", "it", "for", "from", "in", "on",
+            "at", "about", "with", "without", "and", "or", "but", "so", "is", "are",
+            "was", "were", "want", "see", "watch", "give", "show", "tell", "have",
+            "do", "does", "did", "can", "could", "would", "should", "not", "no"
+        }
+        c_words = c_low.split()
+        if any(w in stopwords for w in c_words):
+            return None
+
+        # 1. Gibberish check
+        if is_gibberish(c_low):
+            return None
+
+        # 2. Year or decade check
+        if re.search(r"\b(18\d{2}|19\d{2}|20\d{2})s?\b", c_low) or re.search(r"\b\d{2}s\b", c_low):
+            return None
+
+        # 3. Recommendation / descriptor adjectives check
+        rec_cues = {
+            "best", "top", "good", "great", "popular", "famous", "classic", "new",
+            "recent", "latest", "old", "random", "any", "some", "more", "other",
+            "another", "favorite", "favourite", "cool", "fun", "award winning", "oscar winning"
+        }
+        tokens = re.findall(r"[a-z]+", c_low)
+        if tokens and all(tok in rec_cues for tok in tokens):
+            return None
+
+        # 4. Languages check (e.g. 'tamil', 'korean', 'hindi')
+        for l in self.lang_name_to_code:
+            if len(l) >= 3 and re.search(rf"\b{re.escape(l)}\b", c_low):
+                return None
+
+        # 5. Demonyms / cultural cinema aliases (e.g. 'korean', 'french', 'indian', 'spanish')
+        for d in DEMONYM_ALIASES:
+            if re.search(rf"\b{re.escape(d)}\b", c_low):
+                return None
+
+        # 6. Regions / country names (e.g. 'india', 'japan', 'france')
+        for r in self.region_name_to_code:
+            if len(r) >= 3 and re.search(rf"\b{re.escape(r)}\b", c_low):
+                return None
+
+        # 7. Genres and genre synonyms
+        from src.baselines import ALL_GENRES
+        for g in ALL_GENRES:
+            if re.search(rf"\b{re.escape(g.lower())}\b", c_low):
+                return None
+        for ga in GENRE_ALIASES:
+            if re.search(rf"\b{re.escape(ga.lower())}\b", c_low):
+                return None
+        genre_synonyms = {
+            "thriller", "detective", "family", "funny", "comedies", "comedy",
+            "lasers", "space", "animated", "anime", "scary", "romantic", "kung fu", "suspense"
+        }
+        if any(gs in c_low for gs in genre_synonyms):
+            return None
+
+        # 8. Exact catalog title check
+        if c_low in self.title_map or c_low in self.global_title_to_id:
+            return None
+        if f"the {c_low}" in self.title_map or f"the {c_low}" in self.global_title_to_id:
+            return None
+
+        return candidate
 
     def route_message(self, user_msg: str, user_id: str = "demo_user") -> Dict[str, Any]:
         """Parse message, route to expected tool, execute, and return structured dispatch trace."""
@@ -1777,6 +1905,21 @@ class MovieMindAgent:
                 "response": "I only help with movies. Try a title, genre, or year.",
                 "safe": True,
                 "is_adversarial": True,
+            }
+
+        # Intent: Person / Cast / Crew queries (actors, directors)
+        if self.detect_person_intent(msg):
+            return {
+                "tool": None,
+                "args": {},
+                "result": {},
+                "cards": [],
+                "response": (
+                    "I can't search by actor or director yet, because the catalog has no cast data. "
+                    "I can filter by language, country, genre and year instead, for example 'tamil action films from the 90s'."
+                ),
+                "safe": True,
+                "is_adversarial": False,
             }
 
         # Compound Intent: Feedback THEN recommend (e.g. "i hated Titanic what else", "i loved Aliens, suggest more")
@@ -1853,7 +1996,7 @@ class MovieMindAgent:
                     "args": {"seed_movie": seed_clean, "user_id": user_id, "n": 5},
                     "result": [],
                     "cards": [],
-                    "response": f"I couldn't find '{seed_clean}' in either catalog (not in the MovieLens 1M catalog).",
+                    "response": f"I couldn't find '{seed_clean}' in either catalog (not in the MovieLens 1M catalog or the World catalog).",
                     "safe": True,
                     "is_adversarial": True,
                 }
@@ -2122,7 +2265,7 @@ class MovieMindAgent:
                 resp = f"{prefix}\n" + "\n".join(lines)
             else:
                 cards = []
-                resp = f"I couldn't find '{q_term}' in either catalog (not in the MovieLens 1M catalog)."
+                resp = f"I couldn't find '{q_term}' in either catalog (not in the MovieLens 1M catalog or the World catalog)."
             return {
                 "tool": "search_movies",
                 "args": {"query": q_term.lower()},
@@ -2171,6 +2314,10 @@ class MovieMindAgent:
                 "safe": True,
                 "is_adversarial": True,
             }
+
+        # Check person intent
+        if self.detect_person_intent(user_msg):
+            return self.route_message(user_msg, user_id=user_id)
 
         # Check compound feedback + recommend
         compound_pattern = r"\b(?:i\s+)?(didn'?t\s+like|didnt\s+like|don'?t\s+like|dont\s+like|hated?|disliked?|not\s+a\s+fan\s+of|didn'?t\s+enjoy|didnt\s+enjoy|loved?|liked?|enjoyed?)\s+(.*?)\s*(?:,|\.|\b|\sand\s)\s*(?:and\s+)?(give\s+me\s+something\s+else|give\s+me\s+something\s+better|give\s+me\s+more|something\s+else|what\s+else|what\s+next|anything\s+else|suggest\s+more|suggest\s+another|suggest\s+something\s+else|recommend\s+more|recommend\s+another|recommend\s+something\s+else|what\s+should\s+i\s+watch\s+instead|what\s+should\s+i\s+watch\s+now|show\s+me\s+more|show\s+me\s+another|show\s+me\s+something\s+else|more)\b"
@@ -2299,13 +2446,13 @@ class MovieMindAgent:
 
             # Anti-hallucination catalog guard: unknown/missing movie search returns catalog miss notice
             if fn_name == "search_movies" and not tool_result:
-                q_term = fn_args.get("query", user_msg)
+                q_term = self.clean_search_query(fn_args.get("query", user_msg))
                 return {
                     "tool": fn_name,
                     "args": fn_args,
                     "result": [],
                     "cards": [],
-                    "response": f"I couldn't find '{q_term}' in either catalog (not in the MovieLens 1M catalog).",
+                    "response": f"I couldn't find '{q_term}' in either catalog (not in the MovieLens 1M catalog or the World catalog).",
                     "safe": True,
                     "is_adversarial": True,
                 }
@@ -2347,12 +2494,16 @@ class MovieMindAgent:
             else:
                 content = "Here are your results."
 
+            resp_str = (content or "").strip()
+            if not resp_str and not cards:
+                resp_str = "I didn't catch that. Try a title, a genre, a country, a language or a year."
+
             return {
                 "tool": fn_name,
                 "args": fn_args,
                 "result": tool_result,
                 "cards": cards,
-                "response": content,
+                "response": resp_str,
                 "safe": True,
                 "is_adversarial": False,
             }
@@ -2367,12 +2518,19 @@ class MovieMindAgent:
 
     def chat_fallback(self, user_msg: str, user_id: str = "demo_user") -> str:
         """Rule-based tool router for graceful fallback when no API key is supplied."""
-        return self.route_message(user_msg, user_id=user_id)["response"]
+        res = self.route_message(user_msg, user_id=user_id)
+        resp = (res.get("response") or "").strip()
+        if not resp and not res.get("cards"):
+            return "I didn't catch that. Try a title, a genre, a country, a language or a year."
+        return resp
 
     def chat(self, user_msg: str, user_id: str = "demo_user") -> str:
         """Main chat interface calling LLM with tool calling or falling back gracefully."""
         res = self.route_message_llm(user_msg, user_id=user_id)
-        return res.get("response", "")
+        resp = (res.get("response") or "").strip()
+        if not resp and not res.get("cards"):
+            return "I didn't catch that. Try a title, a genre, a country, a language or a year."
+        return resp
 
 def run_agent_demo():
     print("=== Phase 8: Tool-Calling MovieMind Agent ===")
