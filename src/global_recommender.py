@@ -97,6 +97,50 @@ class GlobalContentRecommender:
                     genre_counts[g.strip()] += 1
         self.available_genres = [g for g, _ in genre_counts.most_common()]
 
+        # Build country->primary_language map from sole-country films in catalog
+        from collections import defaultdict as _defaultdict
+        sole_counts = _defaultdict(Counter)
+        for _, r in self.df.iterrows():
+            cs = [str(c).upper() for c in r.get("origin_countries", []) if c]
+            ls = [str(l).lower() for l in r.get("original_languages", []) if l]
+            if len(cs) == 1 and ls:
+                sole_counts[cs[0]][ls[0]] += 1
+        self.country_primary_lang = {
+            c: lc.most_common(1)[0][0] for c, lc in sole_counts.items() if lc
+        }
+
+    def region_match_tier(self, row: Any, region_code: str) -> Optional[str]:
+        """Return 'core', 'partial', or None for a catalog row vs a region code."""
+        cs = [str(c).upper() for c in (row.get("origin_countries") if isinstance(row, dict) else row["origin_countries"])]
+        ls = [str(l).lower() for l in (row.get("original_languages") if isinstance(row, dict) else row["original_languages"])]
+        if region_code not in cs:
+            return None
+        if cs and cs[0] == region_code:
+            if len(cs) == 1:
+                return "core"
+            primary = self.country_primary_lang.get(region_code)
+            if primary and ls and ls[0] == primary:
+                return "core"
+            return "partial"
+        return "partial"
+
+    def language_match_tier(self, row: Any, lang_code: str) -> Optional[str]:
+        """Return 'core', 'partial', or None for a catalog row vs a language code."""
+        _ENGLISH_MAJORS = {"US", "GB", "AU", "CA"}
+        cs = [str(c).upper() for c in (row.get("origin_countries") if isinstance(row, dict) else row["origin_countries"])]
+        ls = [str(l).lower() for l in (row.get("original_languages") if isinstance(row, dict) else row["original_languages"])]
+        if lang_code not in ls:
+            return None
+        if ls and ls[0] == lang_code:
+            if cs:
+                primary = self.country_primary_lang.get(cs[0])
+                if primary == lang_code:
+                    if len(cs) > 1 and _ENGLISH_MAJORS.intersection(cs):
+                        return "partial"
+                    return "core"
+            return "partial"
+        return "partial"
+
     def get_user_profile_vector(
         self,
         liked_ids: Optional[List[str]] = None,
@@ -199,6 +243,18 @@ class GlobalContentRecommender:
         else:
             scores = cand_priors
 
+        # Match tier labeling for returned cards
+        cand_tier_lookup = {}
+        if region or language:
+            reg_clean = region.strip().upper() if region else None
+            lang_clean = language.strip().lower() if language else None
+            for idx_in_cands, df_idx in enumerate(cand_indices):
+                row = self.df.iloc[df_idx]
+                r_tier = self.region_match_tier(row, reg_clean) if reg_clean else None
+                l_tier = self.language_match_tier(row, lang_clean) if lang_clean else None
+                is_core = (r_tier == "core" or l_tier == "core")
+                cand_tier_lookup[self.idx_to_id[df_idx]] = "core" if is_core else "partial"
+
         # 3. Candidate pool selection for MMR
         pool_size = min(len(cand_indices), max(n * 4, 40))
         top_k_cand = np.argsort(-scores)[:pool_size]
@@ -248,6 +304,7 @@ class GlobalContentRecommender:
                 "origin": origin_str,
                 "language_names_str": language_str,
                 "match_pct": pct,
+                "_match_tier": cand_tier_lookup.get(mid, "core"),
                 "explanation": f"Rating {row['rating']}/10 ({row['votes']:,} votes) • Origin: {origin_str} • {', '.join(genre_list[:2])}",
                 "trace": [
                     {"tool": "content_tfidf", "args": {"mid": mid}, "latency_ms": 1.2},

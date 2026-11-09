@@ -12,3 +12,4 @@ artifacts/global_catalog.parquet
 *.tsv.gz
 *.egg-info/
 .DS_Store
+.env.local

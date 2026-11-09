@@ -292,3 +292,72 @@ def test_old_router_fails_on_real_chat_cases(eval_cases):
             failed_on_old_router += 1
 
     assert failed_on_old_router == 8, f"Expected all 8 real chat cases to fail on old router, but only {failed_on_old_router} failed"
+
+
+def test_filter_match_strength_and_router_parity(agent):
+    """Test data-driven match strength tiers and router parity across 12 filter messages."""
+    twelve_messages = [
+        "spanish dramas",
+        "german war films",
+        "horror films from japan",
+        "indian movies",
+        "french comedies",
+        "italian dramas",
+        "korean thrillers",
+        "mexican films",
+        "brazilian movies",
+        "spanish horror",
+        "german sci-fi",
+        "japanese films from the 1950s",
+    ]
+
+    spanish_bad = {"The Hateful Eight", "Coco", "Elysium", "Black Panther: Wakanda Forever"}
+    german_bad = {"Tropic Thunder", "The Patriot"}
+    japan_bad = {"Get Out", "Nope"}
+
+    for msg in twelve_messages:
+        fb_res = agent.route_message(msg)
+        llm_res = agent.route_message_llm(msg)
+
+        # 7. Parity check: both routers return identical card ids
+        fb_ids = [c.get("movie_id", c.get("id")) for c in fb_res.get("cards", [])]
+        llm_ids = [c.get("movie_id", c.get("id")) for c in llm_res.get("cards", [])]
+        assert fb_ids == llm_ids, f"Router card mismatch on '{msg}':\n  FB:  {fb_ids}\n  LLM: {llm_ids}"
+
+        assert len(fb_ids) == 5, f"Expected 5 cards for '{msg}', got {len(fb_ids)}"
+
+        core_count = sum(1 for c in fb_res.get("cards", []) if c.get("_match_tier") == "core")
+        assert core_count >= 4, f"Expected >= 4 core matches for '{msg}', got {core_count}"
+
+        titles = set(c["title"] for c in fb_res.get("cards", []))
+
+        if msg == "spanish dramas":
+            es_first_count = sum(1 for c in fb_res.get("cards", []) if c.get("original_languages") and c["original_languages"][0] == "es")
+            assert es_first_count >= 4, f"Expected >= 4 es-first for spanish dramas, got {es_first_count}"
+            assert not titles.intersection(spanish_bad), f"Found unwanted films in spanish dramas: {titles.intersection(spanish_bad)}"
+
+        if msg == "german war films":
+            de_first_count = sum(1 for c in fb_res.get("cards", []) if c.get("origin_countries") and (c["origin_countries"][0] in ("DE", "West Germany") or "Germany" in str(c.get("origin"))))
+            assert de_first_count >= 4, f"Expected >= 4 Germany-first for german war films, got {de_first_count}"
+            assert not titles.intersection(german_bad), f"Found unwanted films in german war films: {titles.intersection(german_bad)}"
+
+        if msg == "horror films from japan":
+            jp_first_count = sum(1 for c in fb_res.get("cards", []) if c.get("origin_countries") and (c["origin_countries"][0] == "JP" or "Japan" in str(c.get("origin"))))
+            assert jp_first_count >= 4, f"Expected >= 4 Japan-first for horror films from japan, got {jp_first_count}"
+            assert not titles.intersection(japan_bad), f"Found unwanted films in horror films from japan: {titles.intersection(japan_bad)}"
+
+
+def test_godfather_similarity_top_results(agent):
+    """'movies like The Godfather': seed excluded, >=1 shared genre with seed, Glory not rank 1."""
+    res = agent.route_message("movies like The Godfather")
+    cards = res.get("cards", [])
+    assert len(cards) >= 5
+    titles = [c["title"] for c in cards]
+    assert "The Godfather" not in titles
+    assert titles[0] != "Glory"
+    assert "Godfather: Part II" in titles[0] or "Godfather" in titles[0]
+    seed_meta = agent.movie_meta[858]
+    seed_genres = set(seed_meta["genres"].split("|"))
+    for c in cards[:5]:
+        c_genres = set(c["genres"])
+        assert seed_genres.intersection(c_genres), f"{c['title']} does not share any genre with The Godfather"
