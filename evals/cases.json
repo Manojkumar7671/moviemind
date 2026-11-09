@@ -770,5 +770,265 @@
     "expected_args": {},
     "adversarial": false,
     "description": "Held-out ambiguous: decade and mood phrasing"
+  },
+  {
+    "id": "regression_best_movies",
+    "split": "dev",
+    "category": "recommend",
+    "message": "best movies",
+    "expected_tool": "recommend",
+    "acceptable_tools": [
+      "recommend"
+    ],
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Regression test: intent words route to recommend"
+  },
+  {
+    "id": "regression_top_rated",
+    "split": "dev",
+    "category": "recommend",
+    "message": "top rated",
+    "expected_tool": "recommend",
+    "acceptable_tools": [
+      "recommend"
+    ],
+    "expected_args": {},
+    "adversarial": false,
+    "description": "Regression test: top rated intent routes to recommend"
+  },
+  {
+    "id": "regression_bounds_2026",
+    "split": "dev",
+    "category": "adversarial",
+    "message": "2026",
+    "expected_tool": null,
+    "acceptable_tools": [
+      null
+    ],
+    "expected_args": {},
+    "adversarial": true,
+    "description": "Regression test: bare out-of-bounds year handled with honest bounds message"
+  },
+  {
+    "id": "regression_bounds_movies_in_2026",
+    "split": "dev",
+    "category": "adversarial",
+    "message": "movies in 2026",
+    "expected_tool": null,
+    "acceptable_tools": [
+      null
+    ],
+    "expected_args": {},
+    "adversarial": true,
+    "description": "Regression test: out-of-bounds year phrase handled with honest bounds message"
+  },
+  {
+    "id": "regression_filter_1995",
+    "split": "dev",
+    "category": "filter",
+    "message": "movies from 1995",
+    "expected_tool": "filter_movies",
+    "acceptable_tools": [
+      "filter_movies"
+    ],
+    "expected_args": {
+      "year": 1995
+    },
+    "adversarial": false,
+    "description": "Regression test: in-bounds year routes to filter_movies"
+  },
+  {
+    "id": "regression_good_comedy",
+    "split": "dev",
+    "category": "recommend",
+    "message": "good comedy",
+    "expected_tool": "recommend",
+    "acceptable_tools": [
+      "recommend",
+      "filter_movies"
+    ],
+    "expected_args": {
+      "genres": [
+        "Comedy"
+      ]
+    },
+    "adversarial": false,
+    "description": "Regression test: genre recommendation intent routes to recommend"
+  },
+  {
+    "id": "regression_telugu_2015",
+    "split": "dev",
+    "category": "filter",
+    "message": "telugu movies from 2015",
+    "expected_tool": "filter_movies",
+    "acceptable_tools": [
+      "filter_movies"
+    ],
+    "expected_args": {
+      "language": "te",
+      "year": 2015
+    },
+    "adversarial": false,
+    "description": "Regression test: language and modern year route to world catalog filter"
+  },
+  {
+    "id": "regression_korean_thrillers",
+    "split": "dev",
+    "category": "filter",
+    "message": "korean thrillers",
+    "expected_tool": "filter_movies",
+    "acceptable_tools": [
+      "filter_movies"
+    ],
+    "expected_args": {
+      "genre": "Thriller"
+    },
+    "adversarial": false,
+    "description": "Regression test: demonym region and genre route to world catalog filter"
+  },
+  {
+    "id": "dev_grounding_telugu_movies",
+    "category": "filter",
+    "message": "telugu movies",
+    "expected_tool": "filter_movies",
+    "expected_args": {
+      "language": "te"
+    },
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_korean_thrillers",
+    "category": "filter",
+    "message": "korean thrillers",
+    "expected_tool": "filter_movies",
+    "expected_args": {
+      "language": "ko",
+      "genre": "Thriller"
+    },
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_japanese_1950s",
+    "category": "filter",
+    "message": "japanese films from the 1950s",
+    "expected_tool": "filter_movies",
+    "expected_args": {
+      "region": "JP",
+      "min_year": 1950,
+      "max_year": 1959
+    },
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_indian_movies",
+    "category": "filter",
+    "message": "indian movies",
+    "expected_tool": "filter_movies",
+    "expected_args": {
+      "region": "IN"
+    },
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_toy_story_darker",
+    "category": "recommend",
+    "message": "suggest something like Toy Story but darker",
+    "expected_tool": "recommend",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_dislike_titanic_what_else",
+    "category": "feedback",
+    "message": "i hated Titanic what else",
+    "expected_tool": "record_feedback, recommend",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_like_aliens_suggest_more",
+    "category": "feedback",
+    "message": "i loved Aliens, suggest more",
+    "expected_tool": "record_feedback, recommend",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_inception_world_catalog",
+    "category": "search",
+    "message": "tell me about Inception",
+    "expected_tool": "search_movies",
+    "expected_args": {
+      "query": "inception"
+    },
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_alines_fuzzy",
+    "category": "search",
+    "message": "tell me about alines",
+    "expected_tool": "search_movies",
+    "expected_args": {
+      "query": "aliens"
+    },
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_zzxqv_not_found",
+    "category": "search",
+    "message": "tell me about Zzxqv movie",
+    "expected_tool": "search_movies",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_grounding_movies_in_2026",
+    "category": "filter",
+    "message": "movies in 2026",
+    "expected_tool": "filter_movies",
+    "expected_args": {
+      "year": 2026
+    },
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_intent_movies_like_parasite",
+    "category": "recommend",
+    "message": "movies like Parasite",
+    "expected_tool": "recommend",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_intent_french_comedies",
+    "category": "filter",
+    "message": "show me french comedies",
+    "expected_tool": "filter_movies",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_intent_dislike_matrix_something_else",
+    "category": "feedback",
+    "message": "i didnt like The Matrix, give me something else",
+    "expected_tool": "record_feedback, recommend",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_intent_thanks_bye",
+    "category": "conversation",
+    "message": "thanks bye",
+    "expected_tool": null,
+    "adversarial": false,
+    "split": "dev"
   }
 ]

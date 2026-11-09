@@ -2,9 +2,9 @@ name: MovieMind CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, v2-global ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, v2-global ]
 
 jobs:
   test:
@@ -25,7 +25,7 @@ jobs:
 
       - name: Run Pytest Suite
         run: |
-          pytest -v
+          pytest -v -m "not network"
 
       - name: Verify Evaluation Ablation Run
         run: |

@@ -348,3 +348,102 @@ def test_off_topic_queries_return_movie_only_message():
     movie_miss = agent.route_message("search for Avatar The Way of Water 2022")
     assert movie_miss["tool"] == "search_movies"
     assert "not in the MovieLens 1M catalog" in movie_miss["response"]
+
+# 14. Test: Healthz endpoint
+def test_healthz_endpoint():
+    client = TestClient(app)
+    res = client.get("/healthz")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert "llm_configured" in data
+    assert "world_catalog_loaded" in data
+    assert isinstance(data["llm_configured"], bool)
+    assert isinstance(data["world_catalog_loaded"], bool)
+
+# 15. Test: Zero LLM calls on /api/recommend and /api/global/recommend
+def test_zero_llm_calls_on_recommend_endpoints(monkeypatch):
+    import app.main as main_mod
+    llm_call_count = 0
+
+    class MockCompletions:
+        def create(self, *args, **kwargs):
+            nonlocal llm_call_count
+            llm_call_count += 1
+            raise AssertionError("LLM must not be called during recommendation requests!")
+
+    class MockChat:
+        completions = MockCompletions()
+
+    class MockClient:
+        chat = MockChat()
+
+    monkeypatch.setattr(main_mod.agent, "client", MockClient())
+
+    client = TestClient(main_mod.app)
+
+    # 1. POST /api/recommend
+    res1 = client.post("/api/recommend", json={"user_id": "test_user", "genres": ["Action", "Sci-Fi"], "n": 6})
+    assert res1.status_code == 200
+    assert len(res1.json()["recommendations"]) == 6
+
+    # 2. GET /api/recommend
+    res2 = client.get("/api/recommend?user_id=test_user&n=6")
+    assert res2.status_code == 200
+    assert len(res2.json()["recommendations"]) == 6
+
+    # 3. GET /api/global/recommend
+    res3 = client.get("/api/global/recommend?user_id=test_user&n=6")
+    assert res3.status_code == 200
+    assert len(res3.json()["recommendations"]) == 6
+
+    # Assert exactly 0 calls to LLM occurred
+    assert llm_call_count == 0, f"Expected 0 LLM calls, but got {llm_call_count}"
+
+# 16. Test: API input validation and 4xx status codes
+def test_api_input_validation():
+    client = TestClient(app)
+
+    # 1. POST /api/recommend with > 5 genres
+    res = client.post("/api/recommend", json={"user_id": "u1", "genres": ["Action", "Comedy", "Drama", "Horror", "Sci-Fi", "Thriller"], "n": 6})
+    assert res.status_code == 400
+    assert "Cannot select more than 5 genres" in res.json()["detail"]
+
+    # 2. POST /api/recommend with invalid n
+    res = client.post("/api/recommend", json={"user_id": "u1", "n": 0})
+    assert res.status_code == 400
+    res = client.post("/api/recommend", json={"user_id": "u1", "n": 100})
+    assert res.status_code == 400
+
+    # 3. POST /api/chat with empty or oversize message
+    res = client.post("/api/chat", json={"message": "   "})
+    assert res.status_code == 400
+    res = client.post("/api/chat", json={"message": "a" * 501})
+    assert res.status_code == 400
+
+    # 4. POST /api/onboarding with > 5 genres
+    res = client.post("/api/onboarding", json={"genres": ["Action", "Comedy", "Drama", "Horror", "Sci-Fi", "Thriller"]})
+    assert res.status_code == 400
+
+    # 5. GET /api/global/recommend with year_min > year_max
+    res = client.get("/api/global/recommend?year_min=2020&year_max=1990")
+    assert res.status_code == 400
+
+# 17. Test: Different liked films produce different recommendation lists
+def test_different_liked_films_produce_different_recommendations():
+    from src.agent import MovieMindAgent
+    agent = MovieMindAgent()
+    user_a = "user_toy_story_test"
+    user_b = "user_pulp_fiction_test"
+
+    agent.memory.record_feedback(user_a, 1, "like")     # Toy Story (1995)
+    agent.memory.record_feedback(user_b, 296, "like")   # Pulp Fiction (1994)
+
+    recs_a = [r["title"] for r in agent.recommend(user_id=user_a, n=5)]
+    recs_b = [r["title"] for r in agent.recommend(user_id=user_b, n=5)]
+
+    assert len(recs_a) == 5
+    assert len(recs_b) == 5
+    assert recs_a != recs_b, f"Expected different recommendations, but got same: {recs_a}"
+    assert "Toy Story" not in recs_a, "Liked film should be excluded from recommendations"
+    assert "Pulp Fiction" not in recs_b, "Liked film should be excluded from recommendations"

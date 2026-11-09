@@ -22,6 +22,7 @@
 
     <nav class="nav-tabs" aria-label="Main Navigation">
       <button class="tab-btn active" data-tab="discover" aria-selected="true" role="tab">Discover</button>
+      <button class="tab-btn" data-tab="world" aria-selected="false" role="tab">World cinema</button>
       <button class="tab-btn" data-tab="tastemap" aria-selected="false" role="tab">Taste Map</button>
       <button class="tab-btn" data-tab="eval" aria-selected="false" role="tab">Evaluation</button>
     </nav>
@@ -71,9 +72,70 @@
         <span id="llmFallbackNoticeText">Fallback active: using deterministic data chips.</span>
       </div>
 
+      <!-- Discover MMR Diversification Caption -->
+      <div class="mmr-notice-bar" style="display:flex; align-items:center; gap:8px; margin-bottom:14px; font-size:12px; color:var(--muted);" title="Maximal Marginal Relevance (λ=0.7) balances relevance and diversity to prevent redundant recommendations.">
+        <span style="font-size:13px;">🔀</span>
+        <span>Order is diversified (MMR), so match % is not strictly descending.</span>
+      </div>
+
       <!-- Movie Grid -->
       <div class="movie-grid" id="movieGrid">
         <!-- Rendered by JS -->
+      </div>
+    </section>
+
+    <!-- Tab 2: World cinema -->
+    <section class="tab-content" id="worldTab" role="tabpanel" aria-labelledby="world-tab">
+      <div class="onboarding-banner" style="margin-bottom:24px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+          <div>
+            <h2 class="section-title">World Cinema Explorer</h2>
+            <p class="section-subtitle">Content-based recommender across 30,000+ global feature films from IMDb non-commercial data and Wikidata (CC0) with TF-IDF, Bayesian quality priors, and MMR diversity. Filter by origin country, language, genre, and release year.</p>
+          </div>
+          <span class="live-indicator" style="background:rgba(79,181,165,0.15); color:var(--retro); border:1px solid rgba(79,181,165,0.4); padding:4px 10px; border-radius:6px; font-weight:700;">IMDb NON-COMMERCIAL</span>
+        </div>
+
+        <!-- Filter Controls -->
+        <div class="world-filter-bar" role="search" aria-label="World cinema filters" style="margin-top:16px; display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end;">
+          <div class="filter-group">
+            <label class="filter-label" for="worldRegionSelect">Origin country</label>
+            <select id="worldRegionSelect" class="filter-select">
+              <option value="">All countries</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label" for="worldLanguageSelect">Language</label>
+            <select id="worldLanguageSelect" class="filter-select">
+              <option value="">All languages</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label" for="worldGenreSelect">Genre</label>
+            <select id="worldGenreSelect" class="filter-select">
+              <option value="">All genres</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label" for="worldYearMin">Release year</label>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input type="number" id="worldYearMin" class="filter-input-year" placeholder="Min">
+              <span style="color:var(--muted); font-size:12px;">to</span>
+              <input type="number" id="worldYearMax" class="filter-input-year" placeholder="Max">
+            </div>
+          </div>
+          <div class="filter-actions" style="display:flex; gap:8px;">
+            <button class="btn-primary" onclick="applyWorldFilters()">Apply filters</button>
+            <button class="btn-secondary" onclick="resetWorldFilters()">Reset</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- World Movie Grid -->
+      <div class="movie-grid" id="worldMovieGrid">
+        <!-- Rendered by JS -->
+      </div>
+      <div class="world-footnote-box" style="margin-top:24px; padding:12px 16px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:var(--radius-sm); font-size:12px; color:var(--muted); line-height:1.5;">
+        <strong>Data & Licensing Footnote</strong>: Country-of-origin and language metadata are sourced from <strong>Wikidata (CC0)</strong>. Because international co-productions often originate across multiple nations, films list all verified origin countries. Films without verified Wikidata records are honestly designated as <em>unknown</em>. Movie catalog subset derived from IMDb non-commercial datasets.
       </div>
     </section>
 
@@ -193,8 +255,111 @@
           </table>
         </div>
 
+        <!-- World Cinema Leave-One-Out Evaluation -->
+        <div class="table-card" style="border-left: 4px solid var(--retro);">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+            <div>
+              <span class="live-indicator" style="background:rgba(79,181,165,0.15); color:var(--retro); border:1px solid rgba(79,181,165,0.4); padding:3px 8px; border-radius:4px; font-weight:700; font-size:11px;">CONTENT TARGET RECOVERY (N=500)</span>
+              <h2 class="section-title" style="margin-top:6px;">World Cinema (IMDb + Wikidata) — Fair Content Target Recovery</h2>
+              <p class="section-subtitle">Evaluated on N=500 targets (seed 42). Conditioned on 2 items sharing genre & language; candidate pool shares attributes with conditioning items.</p>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:11px; color:var(--muted); text-transform:uppercase; font-weight:700;">Recommender Hit@20</div>
+              <div style="font-size:32px; font-weight:800; color:var(--retro);" id="worldHit20">5.20%</div>
+              <div style="font-size:11px; color:var(--muted);" id="worldHit20CI">95% CI: [3.57%, 7.51%]</div>
+            </div>
+          </div>
+
+          <div style="margin: 12px 0; padding: 10px 14px; background: rgba(79,181,165,0.08); border: 1px solid rgba(79,181,165,0.25); border-radius: var(--radius-sm); font-size: 12px; color: var(--text);">
+            <strong>Honest & Fair Metric Notice</strong>: Targets share attributes with liked films by construction; comparing against unconditioned global baselines (which lack conditioned attributes) yields an uninformative 0.00% baseline. Claims of lift over unconditioned baselines have been removed. The recommender is compared fairly within the same candidate pool of films matching conditioning attributes. No collaborative filtering performance (collaborative Recall/NDCG) is claimed.
+          </div>
+
+          <div style="overflow-x:auto;">
+            <table class="eval-table">
+              <thead>
+                <tr>
+                  <th>Model / Baseline</th>
+                  <th>Candidate Pool</th>
+                  <th>Hit@20</th>
+                  <th>Hits (N=500)</th>
+                  <th>95% Wilson CI</th>
+                  <th>Diff vs Best In-Pool</th>
+                </tr>
+              </thead>
+              <tbody id="worldEvalTbody">
+                <tr style="color:var(--retro); font-weight:600;">
+                  <td><strong>MovieMind Content Recommender (TF-IDF + Prior + MMR λ=0.7)</strong></td>
+                  <td>Full catalog (profile-guided)</td>
+                  <td id="tableWorldRecHit">5.20%</td>
+                  <td id="tableWorldRecHits">26 / 500</td>
+                  <td id="tableWorldRecCI">[3.57%, 7.51%]</td>
+                  <td id="tableWorldRecDiff" style="font-weight:700; color:var(--retro);">+2.80%</td>
+                </tr>
+                <tr>
+                  <td><strong>In-Pool Random Baseline</strong></td>
+                  <td>Same candidate pool (shared genre & lang)</td>
+                  <td id="tableWorldPoolRandHit">2.40%</td>
+                  <td id="tableWorldPoolRandHits">12 / 500</td>
+                  <td id="tableWorldPoolRandCI">[1.38%, 4.15%]</td>
+                  <td id="tableWorldPoolRandDiff">0.00% (reference)</td>
+                </tr>
+                <tr>
+                  <td><strong>In-Pool Most-Votes Baseline</strong></td>
+                  <td>Same candidate pool (shared genre & lang)</td>
+                  <td id="tableWorldPoolPopHit">1.60%</td>
+                  <td id="tableWorldPoolPopHits">8 / 500</td>
+                  <td id="tableWorldPoolPopCI">[0.81%, 3.13%]</td>
+                  <td id="tableWorldPoolPopDiff">-0.80%</td>
+                </tr>
+                <tr>
+                  <td><strong>Global Random Baseline (Context)</strong></td>
+                  <td>Full catalog (unconditioned)</td>
+                  <td id="tableWorldRandHit">0.00%</td>
+                  <td id="tableWorldRandHits">0 / 500</td>
+                  <td id="tableWorldRandCI">[0.00%, 0.76%]</td>
+                  <td id="tableWorldRandDiff">-2.40%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="ab-metrics-row" style="margin-top:16px;">
+            <div class="metric-box">
+              <div style="font-size:12px; color:var(--muted);">Recommender Hit@20</div>
+              <div class="metric-val-big" style="color:var(--retro);" id="worldRecHitBox">5.20%</div>
+              <div style="font-size:11px; color:var(--muted);" id="worldRecSub">26 hits / 500 • 95% CI: [3.57%, 7.51%]</div>
+            </div>
+            <div class="metric-box">
+              <div style="font-size:12px; color:var(--muted);">In-Pool Random Hit@20</div>
+              <div class="metric-val-big" style="color:var(--text);" id="worldPoolRandHitBox">2.40%</div>
+              <div style="font-size:11px; color:var(--muted);" id="worldPoolRandSub">12 hits / 500 • 95% CI: [1.38%, 4.15%]</div>
+            </div>
+            <div class="metric-box">
+              <div style="font-size:12px; color:var(--muted);">In-Pool Most-Votes Hit@20</div>
+              <div class="metric-val-big" style="color:var(--text);" id="worldPoolPopHitBox">1.60%</div>
+              <div style="font-size:11px; color:var(--muted);" id="worldPoolPopSub">8 hits / 500 • 95% CI: [0.81%, 3.13%]</div>
+            </div>
+            <div class="metric-box">
+              <div style="font-size:12px; color:var(--muted);">Global Most-Votes (Unconditioned)</div>
+              <div class="metric-val-big" style="color:var(--text);" id="worldPopHitBox">0.00%</div>
+              <div style="font-size:11px; color:var(--muted);" id="worldPopSub">0 hits / 500 • 95% CI: [0.00%, 0.76%]</div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </section>
+
+    <!-- App Attributions Footer -->
+    <footer class="app-footer" style="margin-top:40px; padding:24px 16px; border-top:1px solid var(--border); text-align:center; font-size:12px; color:var(--muted); line-height:1.6;">
+      <div>MovieMind Recommender System • Portfolio Demo</div>
+      <div style="margin-top:6px;">
+        Data Attributions: 
+        <strong>MovieLens 1M</strong> (GroupLens Research, University of Minnesota) • 
+        <strong>IMDb Datasets</strong> (Information courtesy of IMDb. Used with permission for non-commercial educational purposes) • 
+        <strong>Wikidata</strong> (Creative Commons CC0 1.0 Universal Public Domain Dedication).
+      </div>
+    </footer>
 
   </main>
 

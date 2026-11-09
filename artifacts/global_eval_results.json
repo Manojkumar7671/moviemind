@@ -1,0 +1,49 @@
+{
+  "n_samples": 500,
+  "seed": 42,
+  "catalog_size": 33485,
+  "recommender_hit20": 0.052,
+  "recommender_hits": 26,
+  "recommender_ci95": [
+    0.0357,
+    0.0751
+  ],
+  "recommender_ci95_str": "[3.57%, 7.51%]",
+  "recommender_diff_vs_best_pool": 0.028,
+  "pool_random_hit20": 0.024,
+  "pool_random_hits": 12,
+  "pool_random_ci95": [
+    0.0138,
+    0.0415
+  ],
+  "pool_random_ci95_str": "[1.38%, 4.15%]",
+  "pool_random_diff_vs_best_pool": 0.0,
+  "pool_popularity_hit20": 0.016,
+  "pool_popularity_hits": 8,
+  "pool_popularity_ci95": [
+    0.0081,
+    0.0313
+  ],
+  "pool_popularity_ci95_str": "[0.81%, 3.13%]",
+  "pool_popularity_diff_vs_best_pool": -0.008,
+  "random_hit20": 0.0,
+  "random_hits": 0,
+  "random_ci95": [
+    0.0,
+    0.0076
+  ],
+  "random_ci95_str": "[0.00%, 0.76%]",
+  "random_diff_vs_best_pool": -0.024,
+  "popularity_hit20": 0.0,
+  "popularity_hits": 0,
+  "popularity_ci95": [
+    0.0,
+    0.0076
+  ],
+  "popularity_ci95_str": "[0.00%, 0.76%]",
+  "best_in_pool_baseline_hit20": 0.024,
+  "lift_over_random": 0.052,
+  "lift_over_popularity": 0.052,
+  "honesty_disclaimer": "Evaluated strictly via content-based target recovery where targets share genres and languages with conditioned liked items. Claims of lift over unconditioned global baselines have been removed; the recommender is compared fairly against random and popularity baselines within the same candidate pool. No collaborative filtering performance (collaborative Recall/NDCG) is claimed because IMDb datasets contain no individual user rating logs.",
+  "limitations": "Target films share attributes with the liked films by construction, so this is a content-similarity sanity check and candidate-retrieval benchmark, not evidence of personalization quality."
+}

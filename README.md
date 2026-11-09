@@ -8,15 +8,23 @@
 
 ---
 
-<!-- UI Screenshots / GIF Placeholders -->
-<div align="center">
-  <img src="docs/ablation_chart.png" alt="MovieMind Offline Ablation Chart" width="100%" />
-  <p><em>Figure 1: Full multi-stage offline ablation across Accuracy (Recall/NDCG), Catalog Coverage, and Intra-List Diversity.</em></p>
-</div>
+## 🌟 Recommender Engine Modes
 
-<!-- Placeholder for interface GIF / screenshots -->
-<!-- ![MovieMind Private Screening Room UI](docs/assets/screenshot_screening_room.png) -->
-<!-- ![MovieMind 2D Taste Map Projection](docs/assets/screenshot_taste_map.png) -->
+MovieMind provides two complementary recommendation modes tailored for different data and catalog contexts:
+
+### 1. Private Screening Room (Collaborative Filtering)
+- **Catalog**: MovieLens 1M (3,952 films, $N=6,040$ users, 1,000,209 ratings across 1919–2000).
+- **Architecture**: Two-Tower PyTorch embeddings + FAISS CPU vector index (Top-200 candidates) $\to$ Wide & Deep cross-feature neural ranker (Top-60) $\to$ Maximal Marginal Relevance (MMR $\lambda=0.7$) intra-list diversification.
+- **Features**: Personalized neural taste representations, demographic priors, and real-time 2D taste map projection via PCA.
+- **Evaluation**: Strict time-based leave-one-out offline test set ($N=6,040$, zero leakage) and simulated position-biased A/B testing (+11.18% CTR lift, $p=0.0002$).
+
+### 2. World Cinema Explorer (Content-Based Filtering)
+- **Catalog**: 33,485 international feature films from IMDb non-commercial datasets (`titleType=movie`, `numVotes >= 2000`, valid release year) with authentic country of origin and original language metadata from **Wikidata (CC0)**.
+- **Scope Limitation**: The catalog filters for feature films with $\ge 2,000$ IMDb votes. It represents curated global cinema with sufficient public reception, **not every film ever made**.
+- **All-Countries Rule**: International co-productions store all origin countries and languages as complete lists without an artificial primary distinction (e.g. *The Godfather* lists both Italy and United States). Films without Wikidata data are honestly labeled "unknown" (2.43% unknown share).
+- **Architecture**: Content TF-IDF vectorization over verified genres, original languages, and origin countries $\to$ Bayesian rating/vote quality priors $\to$ cosine profile similarity $\to$ MMR diversity re-ranking ($\lambda=0.7$).
+- **Features**: Dynamically shifts taste profiles as the user likes movies; multi-dimensional filtering by country name/code (e.g. FR, JP, IN, IT, GB, US, India, Japan), language, genre, and data-driven release year ranges.
+- **Evaluation**: Fair content target recovery benchmark ($N=500$ targets, seed 42) reporting 95% Wilson confidence intervals.
 
 ---
 
@@ -30,6 +38,12 @@ Evaluated on the strict leave-one-out time-based MovieLens 1M test set ($N=6,040
 | **Two-Tower Retrieval** | 0.0285 | 0.0125 | **0.9279** | **12.53** | 0.4397 | 0.1154 | 0.0310 | **0.9995** | **12.63** | 0.5225 |
 | **+ Wide&Deep Ranker** | **0.0445** | **0.0219** | 0.4419 | 10.16 | 0.6364 | 0.1518 | **0.0449** | 0.7842 | 10.90 | 0.6511 |
 | **+ MMR Diversity ($\lambda=0.7$)** | 0.0401 | 0.0200 | 0.4677 | 10.24 | **0.7539** | **0.1523** | 0.0443 | 0.7924 | 10.89 | 0.6663 |
+
+### Honest Analysis: Why Two-Tower Alone Has Lower Recall@10 Than Popularity
+A common point of confusion in two-stage recommenders is why the **Two-Tower Retrieval model alone has a lower Recall@10 (0.0285) than Popularity alone (0.0368)**:
+1. **Retrieval Objective vs. Precision**: Two-Tower FAISS retrieval is designed as a *high-recall candidate generator*, not a high-precision ranker. Its goal is to narrow 3,952 catalog movies down to the top-200 candidates ($K=200$) in ~1.2 ms on CPU.
+2. **Catalog Coverage Trade-off**: Popularity alone achieves 0.0368 Recall@10 by repeatedly recommending the same top 50 blockbusters to every user, resulting in a dismal catalog coverage of **5.07%**. In contrast, Two-Tower explores the entire catalog, achieving **92.79% coverage** and significantly higher novelty (12.53 vs 8.64).
+3. **The Power of the Two-Stage Funnel**: When the Wide & Deep ranker scores the 200 candidates surfaced by the Two-Tower model, Recall@10 jumps to **0.0445** (+20.9% higher than popularity alone) while maintaining broad catalog coverage (44.19%).
 
 ### Per-Genre Accuracy Breakdown (Recall@10)
 | Genre | Test Target Users | Hits@10 | Recall@10 | Share of Hits |
@@ -55,159 +69,97 @@ Evaluated on the strict leave-one-out time-based MovieLens 1M test set ($N=6,040
 
 ---
 
+## 🌍 World Cinema Fair Evaluation (4 Systems)
+
+Evaluated via **fair content target recovery** ($N=500$ targets, seed 42) over 33,485 films from IMDb non-commercial datasets with Wikidata (CC0) origin and language metadata:
+
+### Protocol
+For each target film $T$:
+1. Sample two distinct conditioning films $A$ and $B$ sharing at least one genre and at least one language with $T$.
+2. Construct the user taste profile from $A$ and $B$ only.
+3. Define the candidate pool: all films sharing $\ge 1$ genre and $\ge 1$ language with $A$ or $B$, excluding $A$ and $B$.
+4. Score a **Hit** if target $T$ appears in the top-20 recommendations ($K=20$).
+
+### Results Comparison
+
+| Model / Pipeline | Candidate Pool | Hit@20 | Hits (500 targets) | 95% Wilson CI | Diff vs Best In-Pool |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **MovieMind Content Recommender (TF-IDF + Prior + MMR $\lambda=0.7$)** | Full Catalog (profile-guided) | **5.20%** | **26** | **[3.57%, 7.51%]** | **+2.80%** |
+| **In-Pool Random Baseline** | Same Candidate Pool (shared genre & lang) | 2.40% | 12 | [1.38%, 4.15%] | 0.00% (reference) |
+| **In-Pool Most-Votes Baseline** | Same Candidate Pool (shared genre & lang) | 1.60% | 8 | [0.81%, 3.13%] | -0.80% |
+| **Global Random Baseline (Context)** | Full Catalog (unconditioned) | 0.00% | 0 | [0.00%, 0.76%] | -2.40% |
+
+### Fair Comparison & Candidate Pool Notes
+- **Candidate Pool Fairness**: Because target films share attributes (genre and language) with conditioning films by construction, comparing against unconditioned global baselines (which sample randomly across all 33,485 films without attribute conditioning) yields an uninformative 0.00% hit rate. Claims of lift over unconditioned baselines have been removed.
+- **In-Pool Lift**: Within the exact candidate pool of films matching conditioning attributes (mean pool size $\sim 10,360$ films), the content recommender achieves **5.20% Hit@20** (95% CI: `[3.57%, 7.51%]`), outperforming the in-pool most-votes baseline (**1.60%**, 95% CI: `[0.81%, 3.13%]`) and the in-pool random baseline (**2.40%**, 95% CI: `[1.38%, 4.15%]`).
+- **Honest Disclaimer**: Target films share attributes with conditioning films by construction. This is a content-similarity sanity check and candidate-retrieval benchmark, not evidence of real-world user satisfaction. No collaborative filtering performance (collaborative Recall/NDCG) is claimed on this catalog because IMDb non-commercial datasets contain no individual user rating logs.
+
+---
+
+## 🔬 Simulated A/B Testing Notice
+
+The A/B test reported on the `/ab` dashboard is explicitly **SIMULATED**:
+- **Setup**: Evaluated across $N=5,000$ synthetic user sessions drawn from held-out interactions.
+- **Click Probability Model**: Position-biased examination probability model ($1 / \log_2(\text{rank} + 1)$) combined with item relevance.
+- **Result**: +11.18% relative CTR lift ($p = 0.0002$, two-sided t-test, 95% CI: `[+0.52%, +2.14%]`).
+- **Disclaimer**: This is a mathematically grounded offline simulation designed to evaluate ranking mechanics, **not live production user traffic**.
+
+---
+
+## 🤖 Agent Evaluation Suite (Held-Out Benchmark & Dev Split)
+
+The MovieMind agent features an automated test suite (`evals/cases.json`, run via `pytest tests/test_agent_evals.py` or `python scripts/run_agent_evals.py`) containing **70 total evaluation cases**:
+- **Held-Out Split (15 cases)**: Independent test cases with unseen user phrasings across search, recommend, explain, filter, feedback, profile, ambiguous, and off-topic adversarial queries.
+- **Development Split (55 cases)**: Regression and unit cases covering typo resolution, multi-step actions, intent words (`best movies`, `top rated`), catalog year boundaries (`2026`, `movies in 2026`), and regional queries (`telugu movies from 2015`, `korean thrillers`).
+
+### Held-Out Benchmark Performance
+
+| Router Mode | Total Cases | Passed | Pass Rate (95% Wilson CI) |
+| :--- | :---: | :---: | :---: |
+| **LLM Tool-Calling Agent** | 15 | 15 | **100.0%** `[79.61%, 100.00%]` |
+| **Deterministic Fallback Router** | 15 | 15 | **100.0%** `[79.61%, 100.00%]` |
+| **Adversarial & Guardrail Checks** | 4 | 4 | **100.0%** `[51.01%, 100.00%]` |
+
+*Category Differences: None. Both the LLM Agent and the Fallback Router achieved identical 100% pass rates across all held-out categories.*
+
+### Zero-LLM Cost Policy on Recommendations
+To protect against runaway latency, rate limits, and billing:
+- Generating recommendations (`POST /api/recommend`, `GET /api/recommend`, `GET /api/global/recommend`) makes **exactly zero LLM calls**. Recommendations are served entirely via vectorized PyTorch/FAISS and TF-IDF pipelines (< 20 ms).
+- The LLM is invoked solely when the user opens the chat drawer or clicks "Why this?", cached per movie and user state, with automatic fallback to deterministic data chips upon timeout or rate limit.
+
+---
+
 ## ⚡ How to Run
 
-### Method 1: Local Python (CPU-Only, Any OS)
-
-Because all trained weights, FAISS indices, embeddings, and candidate sets are precomputed in `artifacts/` (< 35 MB total repo footprint), serving requires **zero training**:
+### Local Python (Python 3.11, CPU-Only)
 
 ```bash
 # 1. Clone repository
 git clone https://github.com/manojkumarmathangi/moviemind.git
 cd moviemind
 
-# 2. Create virtual environment (Python 3.11)
+# 2. Create virtual environment
 python3.11 -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
-# 3. Install pinned dependencies
+# 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. (Optional) Configure LLM endpoint (Groq, OpenRouter, etc.)
-cp .env.example .env
-# Configure LLM_BASE_URL, LLM_API_KEY, LLM_MODEL in .env (never commit .env)
+# 4. (Optional) Build world cinema catalog from IMDb datasets
+python scripts/build_catalog.py
 
 # 5. Launch web application
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 - Open **[http://localhost:8000](http://localhost:8000)** for the screening room web application.
-- Open **[http://localhost:8000/ab](http://localhost:8000/ab)** for the A/B test simulation dashboard.
-
-### Method 2: Docker (Single-Command Run)
-
-```bash
-# Build Docker image
-docker build -t moviemind .
-
-# Run container
-docker run -p 8000:8000 moviemind
-```
+- Open **[http://localhost:8000/healthz](http://localhost:8000/healthz)** for container health status.
+- Open **[http://localhost:8000/ab](http://localhost:8000/ab)** for the simulated A/B testing dashboard.
 
 ---
 
-## 🏗 Architecture & Flow
+## ⚖️ Data Licensing & Attributions
 
-```mermaid
-flowchart TD
-    subgraph Data Layer
-        ML1M["MovieLens 1M Dataset"] --> Split["Strict Time-Based Split\n(Last=Test, 2nd-Last=Val, Rest=Train)"]
-        Split --> Parquet["Parquet Datasets\n(data/*.parquet)"]
-    end
-
-    subgraph Stage 1: Retrieval
-        Parquet --> TwoTower["Two-Tower Neural Network\n(User Tower: ID + History + Demographics\nItem Tower: ID + Genres + Year)"]
-        TwoTower --> FAISS["FAISS IndexFlatIP\n(64-dim L2 Normalized Vectors)"]
-        FAISS --> Top200["Top-200 Candidate Generation\n(~1.2ms latency)"]
-    end
-
-    subgraph Stage 2: Heavy Ranking
-        Top200 --> WideDeep["Wide & Deep Ranker\n(User-Genre Affinity + Item Pop + Recency + Tower Score)"]
-        WideDeep --> Top60["High-Precision Scored Candidates\n(~0.8ms latency)"]
-    end
-
-    subgraph Stage 3: Diversity Re-ranking
-        Top60 --> MMR["Maximal Marginal Relevance (MMR)\n(λ=0.7 Intra-List Diversity)"]
-        MMR --> FinalPicks["Final Recommendations\n(~0.4ms latency)"]
-    end
-
-    subgraph Agent & Serving
-        FinalPicks --> Agent["MovieMindAgent\n(OpenAI-Compatible Tool-Calling LLM + Fallback Router)"]
-        Agent <--> SQLite[("SQLite User Memory\n(data/memory.db)")]
-        Agent --> FastAPIServer["FastAPI Backend (app/main.py)"]
-        FastAPIServer --> UI["Screening Room Web UI\n(Vanilla JS + SVG Posters + 2D Taste Map Canvas)"]
-    end
-```
-
----
-
-## 🧠 Design Choices
-
-### 1. Why PyTorch over TensorFlow?
-- **Lightweight & Transparent**: PyTorch provides direct tensor-level execution without the heavy multi-layer abstractions and binary bloat of TensorFlow / TF-Recommenders. Both the Two-Tower model (`src/retrieval.py`) and Wide&Deep ranker (`src/ranker.py`) are cleanly defined in under 90 lines of readable code.
-- **CPU-First Vectorization**: PyTorch tensors seamlessly interoperate with NumPy arrays and FAISS CPU (`IndexFlatIP`), preventing multi-threading libgomp/OpenMP conflicts on macOS and Linux.
-- **Minimal Artifact Size**: The serialized model weights (`two_tower.pt` and `wide_and_deep.pt`) total less than 3 MB combined, enabling instantaneous application startup.
-
-### 2. Why a Two-Stage Pipeline?
-- **Computational Scalability**: Directly scoring 3,900+ items for every user interaction with a high-capacity neural network using multi-field cross-features is computationally prohibitive.
-- **Asymmetric Allocation**: Stage 1 (Two-Tower FAISS) reduces the candidate space by **95%** (from 3,900 items to 200 candidates) in ~1.2ms using simple dot products. Stage 2 (Wide & Deep) then concentrates full computational power on the 200 candidates to model non-linear user-genre affinity and recency interactions in ~0.8ms.
-
-### 3. Why Maximal Marginal Relevance (MMR)?
-- **Overcoming Filter Bubbles**: Pure score-maximizing rankers suffer from severe redundancy, often recommending 5 iterations of the exact same franchise or dominant genre.
-- **Pareto Optimality**: MMR directly optimizes the trade-off between item relevance $S(i)$ and intra-list similarity:
-  $$\text{MMR}(i) = \lambda \cdot S(i) - (1 - \lambda) \cdot \max_{j \in R} \text{sim}(i, j)$$
-  Setting $\lambda = 0.7$ achieves an **+18.5% boost in Intra-List Diversity (ILD@10)** (0.6364 $\to$ 0.7539) while retaining 90%+ of ranker recall.
-
----
-
-## ⚠️ Honest Limitations
-
-1. **Simulated A/B Testing**:
-   - The A/B experiment reported on the `/ab` dashboard is explicitly labeled **SIMULATED**. It computes click examinations using a synthetic position-bias model ($1 / \log_2(\text{rank} + 1)$) on held-out user interactions ($N=5,000$ sessions). While mathematically sound for evaluating relative CTR lift (+11.18%, $p = 0.0002$), it cannot fully capture real-world human behavioral novelty or session exploration.
-2. **MovieLens 1M Dataset Scope**:
-   - The dataset reflects movie ratings collected between 2000 and 2003 on 3,952 movies. It does not reflect modern streaming catalogs, real-time media consumption patterns, or contemporary titles.
-3. **Offline Metrics as Proxies**:
-   - Offline Recall@K and NDCG@K measure the recovery of a single historical leave-one-out interaction. They penalize serendipitous or novel recommendations that the user would have loved simply because they were not recorded in the historical log.
-
----
-
-## 🤖 Agent Evaluation Suite (Held-Out Benchmark & Dev Split)
-
-The agent evaluation suite (`evals/cases.json`, tested via `pytest tests/test_agent_evals.py`) contains **62 automated evaluation cases** cleanly partitioned into a **47-case development set** and a **15-case held-out benchmark** with unseen user phrasings. Benchmark metrics are reported strictly on the **held-out split** to prevent test overfitting:
-
-- **Held-Out Evaluation Split**: 15 cases (Search, Recommend, Explain, Filter, Feedback, Profile, Ambiguous, Adversarial)
-- **LLM Agent Pass Rate (Held-Out)**: **15/15 (100.0%)**
-- **Deterministic Fallback Router Pass Rate (Held-Out)**: **15/15 (100.0%)**
-- **Category Differences**: **0 differences** (identical 100% agreement across all held-out categories)
-- **Development Split Pass Rate**: 47/47 (100.0%)
-
-### Held-Out Pass Rates by Category
-
-| Category | Held-Out Cases | LLM Agent Pass Rate | Fallback Router Pass Rate | Primary Tool | Anti-Hallucination Guardrail |
-| :--- | :---: | :---: | :---: | :--- | :--- |
-| **Adversarial** | 2 | **100.0%** | **100.0%** | Safety & Rejection Layer | Rejects empty queries, handles prompt injection, and reports catalog misses truthfully. |
-| **Ambiguous** | 1 | **100.0%** | **100.0%** | `filter_movies` / `recommend` | Interprets thematic/decade/similarity queries without hallucinating catalog metadata. |
-| **Explain** | 2 | **100.0%** | **100.0%** | `explain` | Cites verified genres and item embeddings cosine similarity; excludes target movie from self-similarity. |
-| **Feedback** | 2 | **100.0%** | **100.0%** | `record_feedback` | Idempotent SQLite storage; prevents duplicate like/dislike inserts. |
-| **Filter** | 2 | **100.0%** | **100.0%** | `filter_movies` | Enforces strict release year boundaries and verified MovieLens genres. |
-| **Profile** | 1 | **100.0%** | **100.0%** | `get_taste_profile` | Grounds summary in recorded user feedback statistics without speculative claims. |
-| **Recommend** | 2 | **100.0%** | **100.0%** | `recommend` | Constrains recommendations to real MovieLens candidate pool; checks disliked history. |
-| **Search** | 3 | **100.0%** | **100.0%** | `search_movies` | Matches catalog substring; returns empty on missing title without inventing items. |
-
-### Evaluation Details & Features
-1. **Adversarial Robustness**:
-   - *Empty Query (`adversarial_empty_input`)*: Prompts user for clarification without crashing or triggering random recommendations.
-   - *Unknown Movie (`adversarial_unknown_movie`)*: Explaining non-existent movie ID `999999` returns explicit catalog miss error without hallucinating titles or release years.
-   - *Prompt Injection (`adversarial_prompt_injection`)*: Injections attempting to reveal system instructions or invent fake movies (`CyberGala 2099`) are refused.
-   - *Movie Not in Catalog (`adversarial_movie_not_in_catalog`)*: Searching for modern titles outside MovieLens 1M (`Avatar The Way of Water 2022`) reports 0 matches truthfully.
-2. **Typo Resilience**: Resolves misspellings like `'tell me about alines'`, `'find jurasic park'`, `'search for godfthr'`, `'why matrixx?'`, and `'I loved termanitor 2'` cleanly to verified MovieLens catalog entities.
-3. **Multi-Step Intent**: Correctly decomposes and sequences compound user requests (e.g. `'find Aliens and explain why I should watch it'`).
-4. **Ambiguous Queries**: Correctly routes `'something like Aliens but newer'` (year-constrained filtering), `'good 90s thriller'` (decade filtering), `'space movies with lasers'`, and `'something funny for family movie night'`.
-5. **Grounded Explanations**: "Why this?" generates exactly one grounded sentence citing real genres and liked movies, with instant deterministic data-chip fallback and a visible UI notice whenever the LLM is unavailable or rate-limited.
-6. **Cloudflare Protection**: All LLM requests include a customized `User-Agent` header (`MovieMind/1.0 (Mozilla/5.0; AI Assistant)`) to prevent Cloudflare HTTP 1010 blocks.
-
----
-
-## 🧪 Running the Test Suite
-
-```bash
-# Run all unit tests and agent evals
-pytest -v
-```
-All 14 test modules verify:
-- Zero data leakage across train/validation/test splits
-- Mathematical accuracy of Recall@K, NDCG@K, Coverage, Novelty, and ILD
-- MMR diversity monotonicity ($\text{ILD}_{\text{MMR}} \ge \text{ILD}_{\text{Ranker}}$)
-- Cold-start recommendation contracts
-- API schema validation and per-stage latency telemetry
-- Dual-router agent evaluation suite across 62 total cases (47 dev cases + 15 held-out benchmark cases)
-- Duplicate feedback prevention and target movie self-exclusion in explanations
+MovieMind utilizes public academic and open-knowledge datasets under their respective terms:
+- **MovieLens 1M**: GroupLens Research, University of Minnesota. Used for academic research and educational demonstration.
+- **IMDb Datasets**: Information courtesy of IMDb (https://www.imdb.com/interfaces/). Used with permission for personal and non-commercial educational purposes. The IMDb derivative parquet artifact is excluded from git redistribution in compliance with IMDb conditions of use.
+- **Wikidata**: Creative Commons CC0 1.0 Universal Public Domain Dedication (https://creativecommons.org/publicdomain/zero/1.0/). Origin country and original language metadata are CC0.

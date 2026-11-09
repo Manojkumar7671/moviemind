@@ -428,26 +428,35 @@ main.app-viewport {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 6px;
+  width: 100%;
 }
 
 .poster-year {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   color: #EDE8DC;
   background: rgba(12, 16, 24, 0.7);
-  padding: 2px 8px;
+  padding: 2px 6px;
   border-radius: var(--radius-sm);
   backdrop-filter: blur(4px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 65%;
+  flex-shrink: 1;
 }
 
 .poster-match-badge {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--primary);
   background: rgba(12, 16, 24, 0.85);
   border: 1px solid rgba(232, 163, 61, 0.4);
-  padding: 2px 8px;
+  padding: 2px 6px;
   border-radius: var(--radius-sm);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .poster-title-area {
@@ -1036,4 +1045,74 @@ body.no-anim *, body.no-anim ::before, body.no-anim ::after {
   margin-left: 6px;
   font-weight: 700;
   vertical-align: middle;
+}
+
+/* World Cinema Filters & Cards */
+.world-filter-bar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filter-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.filter-select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 13px;
+  min-width: 130px;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.filter-select:focus {
+  border-color: var(--primary);
+}
+
+.filter-input-year {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  font-size: 13px;
+  width: 70px;
+  outline: none;
+}
+
+.filter-input-year:focus {
+  border-color: var(--primary);
+}
+
+.card-origin-region-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--retro);
+  background: rgba(79, 181, 165, 0.15);
+  border: 1px solid rgba(79, 181, 165, 0.4);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  margin-left: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

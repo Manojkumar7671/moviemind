@@ -152,7 +152,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadEvaluationData();
 
   const initialTab = (window.location.hash || '').replace('#', '');
-  if (['discover', 'tastemap', 'eval'].includes(initialTab)) {
+  if (['discover', 'world', 'tastemap', 'eval'].includes(initialTab)) {
     switchTab(initialTab);
   }
   if (window.location.search.includes('noanim=1')) {
@@ -211,6 +211,12 @@ function switchTab(tabName) {
 
   if (tabName === 'tastemap') {
     setTimeout(renderTasteMap, 50);
+  } else if (tabName === 'world') {
+    if (!state.worldLoaded) {
+      loadWorldMeta();
+      loadWorldRecommendations();
+      state.worldLoaded = true;
+    }
   }
 }
 
@@ -339,31 +345,53 @@ function updateFallbackNotice(isFallback, noticeText) {
   }
 }
 
+function showGridError(targetGridId, retryFnName, message = "Failed to load recommendations.") {
+  const grid = document.getElementById(targetGridId);
+  if (!grid) return;
+  grid.innerHTML = `
+    <div class="grid-error-state" style="grid-column: 1 / -1; padding: 48px 24px; text-align: center;">
+      <p style="color: var(--muted); font-size: 14px; margin-bottom: 16px;">${message}</p>
+      <button class="btn-secondary" onclick="${retryFnName}()">Retry</button>
+    </div>
+  `;
+}
+
 // Recommendations
 async function loadRecommendations() {
   const grid = document.getElementById('movieGrid');
-  grid.innerHTML = '<div class="skeleton" style="height: 380px;"></div>'.repeat(6);
+  if (grid) {
+    grid.innerHTML = '<div class="skeleton" style="height: 380px; border-radius: var(--radius-md); background: rgba(255,255,255,0.04); animation: pulse 1.5s infinite;"></div>'.repeat(6);
+  }
   try {
     const res = await fetch('/api/recommend', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: state.userId, genres: Array.from(state.selectedGenres), n: 6 })
     });
+    if (!res.ok) {
+      showGridError('movieGrid', 'loadRecommendations');
+      return;
+    }
     const data = await res.json();
     state.movies = data.recommendations || [];
     updateFallbackNotice(data.llm_fallback, data.notice);
     renderMovieGrid(state.movies, data.trace, data.latency_ms, data.llm_fallback);
   } catch (err) {
-    grid.innerHTML = `<div class="meta-chip">Failed to load recommendations: ${err}</div>`;
+    showGridError('movieGrid', 'loadRecommendations', `Failed to load recommendations: ${err}`);
   }
 }
 
-function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false) {
-  const grid = document.getElementById('movieGrid');
+function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false, targetGridId = 'movieGrid') {
+  const grid = document.getElementById(targetGridId);
+  if (!grid) return;
   grid.innerHTML = '';
 
   if (!movies || movies.length === 0) {
-    grid.innerHTML = `<div style="padding: 32px; color: var(--muted);">No movies found. Try selecting different genres.</div>`;
+    if (targetGridId === 'worldMovieGrid') {
+      grid.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1; padding: 48px 24px; text-align: center; color: var(--muted); font-size: 14px;">No films match. Widen the years or remove a filter.</div>`;
+    } else {
+      grid.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1; padding: 32px; text-align: center; color: var(--muted);">No movies found matching current criteria.</div>`;
+    }
     return;
   }
 
@@ -382,6 +410,25 @@ function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false) {
     const rkMs = (latency?.ranker ?? 0.4).toFixed(2);
     const mmrMs = (latency?.mmr ?? 0.2).toFixed(2);
     const totMs = (latency?.total ?? (parseFloat(retMs) + parseFloat(rkMs) + parseFloat(mmrMs))).toFixed(2);
+
+    const isWorldCinema = (targetGridId === 'worldMovieGrid');
+
+    let originBadge = '';
+    let langChipHtml = '';
+
+    if (isWorldCinema) {
+      const originNames = (movie.origin_country_names && movie.origin_country_names.length > 0)
+        ? movie.origin_country_names.join(', ')
+        : (movie.origin || 'unknown');
+      const langNames = (movie.original_language_names && movie.original_language_names.length > 0)
+        ? movie.original_language_names.join(', ')
+        : (movie.language_names_str || '');
+
+      originBadge = ` • <span class="card-origin-region-label" title="${originNames}">Origin: ${originNames}</span>`;
+      if (langNames) {
+        langChipHtml = `<span class="genre-tag language-tag" title="Original language">${langNames}</span>`;
+      }
+    }
 
     let traceStepsHtml = '';
     if (trace && trace.length > 0) {
@@ -409,21 +456,21 @@ function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false) {
         ${generatePosterSvg(movie.title, movie.year, primaryGenre, movie.movie_id)}
         <div class="poster-content">
           <div class="poster-header">
-            <span class="poster-year">${movie.year}</span>
-            <span class="poster-match-badge">${movie.match_pct}% Relative match</span>
+            <span class="poster-year">${movie.year}${originBadge}</span>
+            <span class="poster-match-badge" title="Relative to this list">${movie.match_pct}% match</span>
           </div>
           <div class="poster-title-area">
             <h3 class="poster-title">${movie.title}</h3>
-            <div class="poster-genres-row">${genresHtml}</div>
+            <div class="poster-genres-row">${genresHtml}${langChipHtml}</div>
           </div>
         </div>
       </div>
       <div class="ticket-footer">
         <div class="ticket-actions-row">
-          <button class="btn-ticket" onclick="toggleWhy(${movie.movie_id})">Why this?</button>
+          <button class="btn-ticket" onclick="toggleWhy('${movie.movie_id}')">Why this?</button>
           <div style="display:flex; gap:6px;">
-            <button class="btn-ticket btn-like" onclick="likeMovie(${movie.movie_id})">Like</button>
-            <button class="btn-ticket btn-not-for-me" onclick="dismissMovie(${movie.movie_id})">Not for me</button>
+            <button class="btn-ticket btn-like" onclick="likeMovie('${movie.movie_id}')">Like</button>
+            <button class="btn-ticket btn-not-for-me" onclick="dismissMovie('${movie.movie_id}')">Not for me</button>
           </div>
         </div>
         <div class="why-drawer" id="why-${movie.movie_id}">
@@ -439,7 +486,7 @@ function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false) {
           </div>
 
           <!-- How this was picked trace -->
-          <div class="trace-details" onclick="toggleTrace(${movie.movie_id})">
+          <div class="trace-details" onclick="toggleTrace('${movie.movie_id}')">
             <span id="trace-toggle-arrow-${movie.movie_id}">▸</span> How this was picked
           </div>
           <div class="trace-content" id="trace-${movie.movie_id}">
@@ -458,6 +505,117 @@ function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false) {
     `;
     grid.appendChild(card);
   });
+}
+
+async function loadWorldMeta() {
+  try {
+    const res = await fetch('/api/global/meta');
+    if (!res.ok) return;
+    const meta = await res.json();
+    
+    const regSel = document.getElementById('worldRegionSelect');
+    if (regSel && regSel.options.length <= 1) {
+      meta.regions.forEach(r => {
+        const opt = document.createElement('option');
+        const code = (typeof r === 'object' && r.code) ? r.code : r;
+        const name = (typeof r === 'object' && r.name) ? r.name : code;
+        const count = (typeof r === 'object' && r.count !== undefined) ? ` (${r.count.toLocaleString()})` : '';
+        opt.value = code;
+        opt.textContent = `${name}${count}`;
+        regSel.appendChild(opt);
+      });
+    }
+
+    const langSel = document.getElementById('worldLanguageSelect');
+    if (langSel && langSel.options.length <= 1) {
+      meta.languages.forEach(l => {
+        const opt = document.createElement('option');
+        const code = (typeof l === 'object' && l.code) ? l.code : l;
+        const name = (typeof l === 'object' && l.name) ? l.name : code;
+        const count = (typeof l === 'object' && l.count !== undefined) ? ` (${l.count.toLocaleString()})` : '';
+        opt.value = code;
+        opt.textContent = `${name}${count}`;
+        langSel.appendChild(opt);
+      });
+    }
+
+    const genSel = document.getElementById('worldGenreSelect');
+    if (genSel && genSel.options.length <= 1) {
+      meta.genres.forEach(g => {
+        const opt = document.createElement('option');
+        opt.value = g;
+        opt.textContent = g;
+        genSel.appendChild(opt);
+      });
+    }
+
+    const yMin = document.getElementById('worldYearMin');
+    const yMax = document.getElementById('worldYearMax');
+    if (yMin) yMin.placeholder = meta.year_min;
+    if (yMax) yMax.placeholder = meta.year_max;
+  } catch (err) {
+    console.error("Failed to load world meta:", err);
+  }
+}
+
+async function loadWorldRecommendations() {
+  const grid = document.getElementById('worldMovieGrid');
+  if (grid) {
+    grid.innerHTML = '<div class="skeleton" style="height: 380px; border-radius: var(--radius-md); background: rgba(255,255,255,0.04); animation: pulse 1.5s infinite;"></div>'.repeat(6);
+  }
+
+  const reg = document.getElementById('worldRegionSelect')?.value || '';
+  const lang = document.getElementById('worldLanguageSelect')?.value || '';
+  const genre = document.getElementById('worldGenreSelect')?.value || '';
+  const yMin = document.getElementById('worldYearMin')?.value || '';
+  const yMax = document.getElementById('worldYearMax')?.value || '';
+
+  // Preserve sticky filter state across re-renders
+  state.worldFilters = {
+    region: reg,
+    language: lang,
+    genre: genre,
+    year_min: yMin,
+    year_max: yMax,
+  };
+
+  const params = new URLSearchParams({
+    user_id: state.userId,
+    n: 12,
+  });
+  if (reg) params.set('region', reg);
+  if (lang) params.set('language', lang);
+  if (genre) params.set('genre', genre);
+  if (yMin) params.set('year_min', yMin);
+  if (yMax) params.set('year_max', yMax);
+
+  try {
+    const res = await fetch(`/api/global/recommend?${params.toString()}`);
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      const msg = errData.detail || "Failed to load world recommendations.";
+      showGridError('worldMovieGrid', 'loadWorldRecommendations', msg);
+      return;
+    }
+    const data = await res.json();
+    renderMovieGrid(data.recommendations, [], { total: data.total_ms }, false, 'worldMovieGrid');
+  } catch (err) {
+    console.error("Failed to load world recommendations:", err);
+    showGridError('worldMovieGrid', 'loadWorldRecommendations', "Network connection error.");
+  }
+}
+
+function applyWorldFilters() {
+  loadWorldRecommendations();
+}
+
+function resetWorldFilters() {
+  if (document.getElementById('worldRegionSelect')) document.getElementById('worldRegionSelect').value = '';
+  if (document.getElementById('worldLanguageSelect')) document.getElementById('worldLanguageSelect').value = '';
+  if (document.getElementById('worldGenreSelect')) document.getElementById('worldGenreSelect').value = '';
+  if (document.getElementById('worldYearMin')) document.getElementById('worldYearMin').value = '';
+  if (document.getElementById('worldYearMax')) document.getElementById('worldYearMax').value = '';
+  loadWorldRecommendations();
 }
 
 async function toggleWhy(id) {
@@ -503,12 +661,15 @@ async function likeMovie(movieId) {
   });
   showToast("Added to likes. Updating your recommendations...");
   await loadRecommendations();
+  if (state.activeTab === 'world') {
+    await loadWorldRecommendations();
+  }
   await loadTasteMap();
 }
 
 async function dismissMovie(movieId) {
   const card = document.getElementById(`card-${movieId}`);
-  const movieObj = state.movies.find(m => m.movie_id === movieId);
+  const movieObj = state.movies.find(m => String(m.movie_id) === String(movieId));
   state.lastDismissed = movieObj;
 
   if (card) {
@@ -524,6 +685,9 @@ async function dismissMovie(movieId) {
   });
 
   showToast(`Removed from picks`, true);
+  if (state.activeTab === 'world') {
+    await loadWorldRecommendations();
+  }
   await loadTasteMap();
 }
 
@@ -538,6 +702,9 @@ async function undoDismiss() {
   state.lastDismissed = null;
   showToast("Restored movie.");
   await loadRecommendations();
+  if (state.activeTab === 'world') {
+    await loadWorldRecommendations();
+  }
   await loadTasteMap();
 }
 
@@ -779,6 +946,51 @@ async function loadEvaluationData() {
         <tr><td>Ambiguous & Thematic Constraints</td><td>5</td><td><strong style="color:#10B981;">100%</strong></td><td><strong style="color:var(--primary);">100%</strong></td><td>filter/recommend</td></tr>
         <tr><td>Adversarial Anti-Hallucination</td><td>4</td><td><strong style="color:#10B981;">100%</strong></td><td><strong style="color:var(--primary);">100%</strong></td><td>catalog bounds guard</td></tr>
       `;
+    }
+
+    // World Cinema Content Evaluation
+    if (data.world_cinema_eval) {
+      const w = data.world_cinema_eval;
+      const elH20 = document.getElementById('worldHit20');
+      if (elH20 && w.recommender_hit20 !== undefined) {
+        elH20.innerText = `${(w.recommender_hit20 * 100).toFixed(2)}%`;
+      }
+      const elH20CI = document.getElementById('worldHit20CI');
+      if (elH20CI && w.recommender_ci95_str) {
+        elH20CI.innerText = `95% CI: ${w.recommender_ci95_str}`;
+      }
+      const elRecBox = document.getElementById('worldRecHitBox');
+      if (elRecBox && w.recommender_hit20 !== undefined) {
+        elRecBox.innerText = `${(w.recommender_hit20 * 100).toFixed(2)}%`;
+      }
+      const elRecSub = document.getElementById('worldRecSub');
+      if (elRecSub && w.recommender_hits !== undefined) {
+        elRecSub.innerText = `${w.recommender_hits} hits / ${w.n_samples || 500} • 95% CI: ${w.recommender_ci95_str || ''}`;
+      }
+      const elPoolRandBox = document.getElementById('worldPoolRandHitBox');
+      if (elPoolRandBox && w.pool_random_hit20 !== undefined) {
+        elPoolRandBox.innerText = `${(w.pool_random_hit20 * 100).toFixed(2)}%`;
+      }
+      const elPoolRandSub = document.getElementById('worldPoolRandSub');
+      if (elPoolRandSub && w.pool_random_hits !== undefined) {
+        elPoolRandSub.innerText = `${w.pool_random_hits} hits / ${w.n_samples || 500} • 95% CI: ${w.pool_random_ci95_str || ''}`;
+      }
+      const elPoolPopBox = document.getElementById('worldPoolPopHitBox');
+      if (elPoolPopBox && w.pool_popularity_hit20 !== undefined) {
+        elPoolPopBox.innerText = `${(w.pool_popularity_hit20 * 100).toFixed(2)}%`;
+      }
+      const elPoolPopSub = document.getElementById('worldPoolPopSub');
+      if (elPoolPopSub && w.pool_popularity_hits !== undefined) {
+        elPoolPopSub.innerText = `${w.pool_popularity_hits} hits / ${w.n_samples || 500} • 95% CI: ${w.pool_popularity_ci95_str || ''}`;
+      }
+      const elPopBox = document.getElementById('worldPopHitBox');
+      if (elPopBox && w.popularity_hit20 !== undefined) {
+        elPopBox.innerText = `${(w.popularity_hit20 * 100).toFixed(2)}%`;
+      }
+      const elPopSub = document.getElementById('worldPopSub');
+      if (elPopSub && w.popularity_hits !== undefined) {
+        elPopSub.innerText = `${w.popularity_hits} hits / ${w.n_samples || 500} • 95% CI: ${w.popularity_ci95_str || ''}`;
+      }
     }
   } catch (err) {
     console.error('Failed to load evaluation data:', err);

@@ -18,6 +18,7 @@ from src.agent import MovieMindAgent
 from src.baselines import ALL_GENRES
 from src.coldstart import ColdStartRecommender
 from src.taste_map import TasteMapService
+from src.global_recommender import GlobalContentRecommender
 
 app = FastAPI(title="MovieMind", version="1.0.0")
 
@@ -38,6 +39,15 @@ agent = MovieMindAgent()
 coldstart = ColdStartRecommender()
 taste_map_service = TasteMapService()
 
+global_recommender: Optional[GlobalContentRecommender] = None
+global_catalog_file = ARTIFACTS_DIR / "global_catalog.parquet"
+if global_catalog_file.exists():
+    try:
+        global_recommender = GlobalContentRecommender(global_catalog_file)
+    except Exception as e:
+        print(f"Warning: could not initialize global recommender: {e}")
+        global_recommender = None
+
 class ChatRequest(BaseModel):
     message: str
     user_id: Optional[str] = "demo_user"
@@ -48,7 +58,7 @@ class OnboardingRequest(BaseModel):
 
 class FeedbackRequest(BaseModel):
     user_id: Optional[str] = "demo_user"
-    movie_id: int
+    movie_id: Any
     feedback_type: str
 
 class RecommendRequest(BaseModel):
@@ -59,6 +69,14 @@ class RecommendRequest(BaseModel):
 @app.get("/api/health")
 def healthcheck():
     return {"status": "ok", "app": "MovieMind", "version": "1.0.0"}
+
+@app.get("/healthz")
+def healthz():
+    return {
+        "status": "ok",
+        "llm_configured": bool(agent.client is not None),
+        "world_catalog_loaded": bool(global_recommender is not None and global_recommender.df is not None),
+    }
 
 @app.get("/api/genres")
 def get_genres():
@@ -90,15 +108,95 @@ def onboarding(req: OnboardingRequest):
 @app.post("/api/recommend")
 def post_recommendations(req: RecommendRequest):
     uid = req.user_id or "demo_user"
-    return agent.recommend_detailed(uid, genres=req.genres, n=req.n or 6)
+    if req.genres and len(req.genres) > 5:
+        raise HTTPException(status_code=400, detail="Cannot select more than 5 genres")
+    n = req.n if req.n is not None else 6
+    if n < 1 or n > 50:
+        raise HTTPException(status_code=400, detail="n must be between 1 and 50")
+    return agent.recommend_detailed(uid, genres=req.genres, n=n)
 
 @app.get("/api/recommend")
 def get_recommendations(user_id: str = "demo_user", n: int = 6):
+    if n < 1 or n > 50:
+        raise HTTPException(status_code=400, detail="n must be between 1 and 50")
     return agent.recommend_detailed(user_id, n=n)
 
 @app.get("/api/why-this")
-def get_why_this(movie_id: int, user_id: str = "demo_user"):
-    return agent.get_grounded_explanation(movie_id, user_id=user_id)
+def get_why_this(movie_id: Any, user_id: str = "demo_user"):
+    mid_str = str(movie_id)
+    if global_recommender and mid_str in global_recommender.id_to_idx:
+        row = global_recommender.df.iloc[global_recommender.id_to_idx[mid_str]]
+        genres = [g.strip() for g in row["genres"].split("|") if g.strip()]
+        orig_names = list(row["origin_country_names"])
+        orig_str = ", ".join(orig_names) if len(orig_names) > 0 else "international"
+        return {
+            "movie_id": mid_str,
+            "text": f"{row['title']} ({row['year']}) is an acclaimed {orig_str} feature with {row['rating']}/10 across {row['votes']:,} IMDb ratings, matching your interest in {', '.join(genres[:2])}.",
+            "matched_genres": genres[:2],
+            "similar_liked_movies": [],
+            "cached": True,
+            "llm_fallback": True,
+        }
+    return agent.get_grounded_explanation(int(movie_id) if str(movie_id).isdigit() else movie_id, user_id=user_id)
+
+@app.get("/api/global/meta")
+def get_global_meta():
+    if global_recommender is None:
+        raise HTTPException(
+            status_code=503,
+            detail="World catalog not built. Run python scripts/build_catalog.py"
+        )
+    return {
+        "year_min": global_recommender.min_year,
+        "year_max": global_recommender.max_year,
+        "regions": global_recommender.available_regions,
+        "languages": global_recommender.available_languages,
+        "genres": global_recommender.available_genres,
+    }
+
+@app.get("/api/global/recommend")
+def get_global_recommend(
+    user_id: str = "demo_user",
+    region: Optional[str] = None,
+    language: Optional[str] = None,
+    genre: Optional[str] = None,
+    year_min: Optional[int] = None,
+    year_max: Optional[int] = None,
+    n: int = 12,
+    lmbda: float = 0.7,
+):
+    if global_recommender is None:
+        raise HTTPException(
+            status_code=503,
+            detail="World catalog not built. Run python scripts/build_catalog.py"
+        )
+    if year_min is not None and year_max is not None and year_min > year_max:
+        raise HTTPException(status_code=400, detail="year_min cannot be greater than year_max")
+    if n < 1 or n > 50:
+        raise HTTPException(status_code=400, detail="n must be between 1 and 50")
+    genres = [g.strip() for g in genre.split(",") if g.strip()] if genre else None
+    if genres and len(genres) > 5:
+        raise HTTPException(status_code=400, detail="Cannot select more than 5 genres")
+    fb = agent.memory.get_feedback(user_id)
+    liked_ids = [str(m) for m in fb["liked"]]
+    genres = [g.strip() for g in genre.split(",") if g.strip()] if genre else None
+    t0 = time.perf_counter()
+    recs = global_recommender.recommend(
+        liked_ids=liked_ids,
+        genres=genres,
+        region=region if region and region != "all" else None,
+        language=language if language and language != "all" else None,
+        year_min=year_min,
+        year_max=year_max,
+        n=n,
+        lmbda=lmbda,
+    )
+    total_ms = round((time.perf_counter() - t0) * 1000, 2)
+    return {
+        "recommendations": recs,
+        "total_ms": total_ms,
+        "count": len(recs),
+    }
 
 @app.get("/api/taste-map")
 def get_taste_map(user_id: str = "demo_user"):
@@ -168,34 +266,55 @@ def get_eval():
         except Exception:
             pass
 
+    global_eval_file = ARTIFACTS_DIR / "global_eval_results.json"
+    world_cinema_eval = None
+    if global_eval_file.exists():
+        try:
+            with open(global_eval_file) as f:
+                world_cinema_eval = json.load(f)
+        except Exception:
+            pass
+
     return {
         "ablation_table": ablation_table,
         "ab_test": ab_result,
         "agent_evals": agent_eval_summary,
+        "world_cinema_eval": world_cinema_eval,
     }
 
 @app.post("/api/chat")
 def chat_endpoint(req: ChatRequest):
     uid = req.user_id or "demo_user"
-    if not req.message.strip():
+    msg = (req.message or "").strip()
+    if not msg:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
+    if len(msg) > 500:
+        raise HTTPException(status_code=400, detail="Message too long (max 500 characters)")
     t0 = time.perf_counter()
-    reply = agent.chat(req.message, user_id=uid)
+    res = agent.route_message_llm(req.message, user_id=uid)
     dur_ms = round((time.perf_counter() - t0) * 1000, 2)
 
-    low = req.message.lower()
-    cards = []
-    if any(k in low for k in ("recommend", "suggest", "what should i watch", "picks", "give me")):
-        rec_res = agent.recommend_detailed(uid, n=4)
-        cards = rec_res.get("recommendations", [])
+    cards = res.get("cards", [])
+    if not cards and isinstance(res.get("result"), list) and len(res["result"]) > 0:
+        if isinstance(res["result"][0], dict) and "title" in res["result"][0]:
+            source = res["result"][0].get("catalog_source", "MovieLens 1M")
+            cards = agent._format_cards(res["result"], source=source)
+
+    trace = res.get("trace", [])
+    if not trace:
+        trace = [{"tool": res.get("tool"), "args": res.get("args"), "latency_ms": dur_ms}]
+
+    resp_text = (res.get("response") or "").strip()
+    if not resp_text and not cards:
+        resp_text = "I didn't catch that. Try a title, a genre, a country, a language or a year."
 
     return {
-        "response": reply,
+        "response": resp_text,
         "user_id": uid,
         "cards": cards,
-        "latency_ms": {"total": dur_ms},
-        "trace": [{"tool": "chat_router", "args": {"message": req.message}, "latency_ms": dur_ms}],
-        "llm_fallback": bool(not agent.client),
+        "latency_ms": res.get("latency_ms", {"total": dur_ms}),
+        "trace": trace,
+        "llm_fallback": res.get("llm_fallback", bool(not agent.client)),
     }
 
 @app.post("/api/feedback")

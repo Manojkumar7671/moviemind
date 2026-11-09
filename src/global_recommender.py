@@ -1,0 +1,315 @@
+"""Content-based recommender over the World Cinema catalog.
+
+Features:
+- TF-IDF over genres, original languages, and origin countries (sourced from Wikidata CC0)
+- Bayesian rating/votes prior
+- Cosine similarity with user taste profile vector
+- Likes dynamically shift user profile vector
+- Maximal Marginal Relevance (MMR) re-ranking for intra-list diversity
+"""
+
+from __future__ import annotations
+
+from collections import Counter
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+from src.diversity import mmr_rerank
+
+CATALOG_PATH = Path(__file__).resolve().parent.parent / "artifacts" / "global_catalog.parquet"
+
+
+class GlobalContentRecommender:
+    def __init__(self, catalog_path: Path = CATALOG_PATH):
+        self.catalog_path = Path(catalog_path)
+        self.df = pd.read_parquet(self.catalog_path)
+        self.n_items = len(self.df)
+
+        self.id_to_idx = {mid: idx for idx, mid in enumerate(self.df["id"])}
+        self.idx_to_id = {idx: mid for idx, mid in enumerate(self.df["id"])}
+
+        # 1. Build text representations for TF-IDF from genres, original_languages, and origin_countries
+        feature_texts = []
+        for _, r in self.df.iterrows():
+            genres = " ".join([f"g_{g.strip().lower()}" for g in r["genres"].split("|") if g.strip()])
+            langs = " ".join([f"l_{str(l).strip().lower()}" for l in r["original_languages"] if str(l).strip()])
+            countries = " ".join([f"c_{str(c).strip().lower()}" for c in r["origin_countries"] if str(c).strip()])
+            tokens = f"{genres} {langs} {countries}".strip()
+            feature_texts.append(tokens if tokens else "empty")
+
+        self.vectorizer = TfidfVectorizer(token_pattern=r"(?u)\b\w+\b")
+        self.tfidf_matrix = self.vectorizer.fit_transform(feature_texts)
+
+        # 2. Bayesian rating/votes prior
+        C = float(self.df["rating"].mean())
+        m = 2000.0
+        v = self.df["votes"].to_numpy(dtype=np.float32)
+        R = self.df["rating"].to_numpy(dtype=np.float32)
+        bayes_rating = (v / (v + m)) * R + (m / (v + m)) * C
+        self.prior = np.clip((bayes_rating - 4.0) / 5.5, 0.0, 1.0).astype(np.float32)
+
+        # 3. Dynamic metadata bounds and counts derived from data
+        self.min_year = int(self.df["year"].min())
+        self.max_year = int(self.df["year"].max())
+
+        region_counts = Counter()
+        region_names: Dict[str, str] = {}
+        for _, row in self.df.iterrows():
+            cs = row["origin_countries"]
+            clbls = row["origin_country_names"]
+            for c, lbl in zip(cs, clbls):
+                if c:
+                    code = str(c).upper()
+                    region_counts[code] += 1
+                    if lbl:
+                        region_names[code] = str(lbl)
+
+        self.available_regions = [
+            {"code": code, "name": region_names.get(code, code), "count": count}
+            for code, count in region_counts.most_common()
+        ]
+
+        lang_counts = Counter()
+        lang_names: Dict[str, str] = {}
+        for _, row in self.df.iterrows():
+            ls = row["original_languages"]
+            llbls = row["original_language_names"]
+            for l, lbl in zip(ls, llbls):
+                if l:
+                    code = str(l).lower()
+                    lang_counts[code] += 1
+                    if lbl:
+                        lang_names[code] = str(lbl)
+
+        self.available_languages = [
+            {"code": code, "name": lang_names.get(code, code), "count": count}
+            for code, count in lang_counts.most_common()
+        ]
+
+        genre_counts = Counter()
+        for _, row in self.df.iterrows():
+            for g in row["genres"].split("|"):
+                if g.strip():
+                    genre_counts[g.strip()] += 1
+        self.available_genres = [g for g, _ in genre_counts.most_common()]
+
+        # Build country->primary_language map from sole-country films in catalog
+        from collections import defaultdict as _defaultdict
+        sole_counts = _defaultdict(Counter)
+        for _, r in self.df.iterrows():
+            cs = [str(c).upper() for c in r.get("origin_countries", []) if c]
+            ls = [str(l).lower() for l in r.get("original_languages", []) if l]
+            if len(cs) == 1 and ls:
+                sole_counts[cs[0]][ls[0]] += 1
+        self.country_primary_lang = {
+            c: lc.most_common(1)[0][0] for c, lc in sole_counts.items() if lc
+        }
+
+    def region_match_tier(self, row: Any, region_code: str) -> Optional[str]:
+        """Return 'core', 'partial', or None for a catalog row vs a region code."""
+        cs = [str(c).upper() for c in (row.get("origin_countries") if isinstance(row, dict) else row["origin_countries"])]
+        ls = [str(l).lower() for l in (row.get("original_languages") if isinstance(row, dict) else row["original_languages"])]
+        valid_codes = {"DE", "WEST GERMANY"} if region_code == "DE" else {region_code}
+        if not any(c in valid_codes for c in cs):
+            return None
+        if cs and cs[0] in valid_codes:
+            if len(cs) == 1:
+                return "core"
+            primary = self.country_primary_lang.get(region_code)
+            if primary and ls and ls[0] == primary:
+                return "core"
+            return "partial"
+        return "partial"
+
+    def language_match_tier(self, row: Any, lang_code: str) -> Optional[str]:
+        """Return 'core', 'partial', or None for a catalog row vs a language code."""
+        _ENGLISH_MAJORS = {"US", "GB", "AU", "CA"}
+        cs = [str(c).upper() for c in (row.get("origin_countries") if isinstance(row, dict) else row["origin_countries"])]
+        ls = [str(l).lower() for l in (row.get("original_languages") if isinstance(row, dict) else row["original_languages"])]
+        if lang_code not in ls:
+            return None
+        if ls and ls[0] == lang_code:
+            if lang_code != "en":
+                if len(cs) == 1 and cs[0] in _ENGLISH_MAJORS:
+                    return "partial"
+                if len(cs) > 1 and _ENGLISH_MAJORS.intersection(cs):
+                    return "partial"
+            return "core"
+        return "partial"
+
+    def get_user_profile_vector(
+        self,
+        liked_ids: Optional[List[str]] = None,
+        preferred_genres: Optional[List[str]] = None,
+        preferred_region: Optional[str] = None,
+        preferred_language: Optional[str] = None,
+    ) -> Optional[np.ndarray]:
+        """Compute user profile vector shifted by likes and explicit preferences."""
+        liked_vec = None
+        if liked_ids:
+            valid_indices = [self.id_to_idx[mid] for mid in liked_ids if mid in self.id_to_idx]
+            if valid_indices:
+                liked_sub = self.tfidf_matrix[valid_indices]
+                liked_vec = np.asarray(liked_sub.mean(axis=0)).flatten()
+                norm = np.linalg.norm(liked_vec)
+                if norm > 0:
+                    liked_vec /= norm
+
+        query_tokens = []
+        if preferred_genres:
+            query_tokens.extend([f"g_{g.strip().lower()}" for g in preferred_genres if g.strip()])
+        if preferred_region:
+            query_tokens.append(f"c_{preferred_region.strip().lower()}")
+        if preferred_language:
+            query_tokens.append(f"l_{preferred_language.strip().lower()}")
+
+        pref_vec = None
+        if query_tokens:
+            raw_v = np.asarray(self.vectorizer.transform([" ".join(query_tokens)]).todense()).flatten()
+            norm = np.linalg.norm(raw_v)
+            if norm > 0:
+                pref_vec = raw_v / norm
+
+        if liked_vec is not None and pref_vec is not None:
+            combined = 0.7 * liked_vec + 0.3 * pref_vec
+            c_norm = np.linalg.norm(combined)
+            return combined / c_norm if c_norm > 0 else combined
+        if liked_vec is not None:
+            return liked_vec
+        return pref_vec
+
+    def recommend(
+        self,
+        liked_ids: Optional[List[str]] = None,
+        genres: Optional[List[str]] = None,
+        region: Optional[str] = None,
+        language: Optional[str] = None,
+        year_min: Optional[int] = None,
+        year_max: Optional[int] = None,
+        n: int = 12,
+        lmbda: float = 0.7,
+    ) -> List[Dict[str, Any]]:
+        """Return diverse content-based recommendations with metadata filters."""
+        # 1. Candidate filtering mask
+        mask = np.ones(self.n_items, dtype=bool)
+
+        if year_min is not None:
+            mask &= (self.df["year"] >= year_min)
+        if year_max is not None:
+            mask &= (self.df["year"] <= year_max)
+
+        # Region filter: requested country matches ANY element of origin_countries; exclude empty
+        if region:
+            reg_clean = region.strip().upper()
+            mask &= self.df["origin_countries"].apply(
+                lambda cs: bool(len(cs) > 0) and any(str(c).upper() == reg_clean for c in cs)
+            )
+
+        # Language filter: requested language matches ANY element of original_languages; exclude empty
+        if language:
+            lang_clean = language.strip().lower()
+            mask &= self.df["original_languages"].apply(
+                lambda ls: bool(len(ls) > 0) and any(str(l).lower() == lang_clean for l in ls)
+            )
+
+        if genres:
+            g_set = set(g.strip().lower() for g in genres if g.strip())
+            mask &= self.df["genres"].apply(
+                lambda s: bool(set(x.lower() for x in s.split("|") if x) & g_set)
+            )
+
+        if liked_ids:
+            liked_set = set(liked_ids)
+            mask &= ~self.df["id"].isin(liked_set)
+
+        cand_indices = np.where(mask)[0]
+        if len(cand_indices) == 0:
+            return []
+
+        # 2. Score computation: Cosine similarity + Bayesian prior
+        profile_vec = self.get_user_profile_vector(
+            liked_ids=liked_ids,
+        )
+
+        cand_priors = self.prior[cand_indices]
+        if profile_vec is not None:
+            sub_tfidf = self.tfidf_matrix[cand_indices]
+            sims = np.asarray(sub_tfidf.dot(profile_vec)).flatten()
+            scores = 0.75 * sims + 0.25 * cand_priors
+        else:
+            scores = cand_priors
+
+        # Match tier labeling for returned cards
+        cand_tier_lookup = {}
+        if region or language:
+            reg_clean = region.strip().upper() if region else None
+            lang_clean = language.strip().lower() if language else None
+            for idx_in_cands, df_idx in enumerate(cand_indices):
+                row = self.df.iloc[df_idx]
+                r_tier = self.region_match_tier(row, reg_clean) if reg_clean else None
+                l_tier = self.language_match_tier(row, lang_clean) if lang_clean else None
+                is_core = (r_tier == "core" or l_tier == "core")
+                cand_tier_lookup[self.idx_to_id[df_idx]] = "core" if is_core else "partial"
+
+        # 3. Candidate pool selection for MMR
+        pool_size = min(len(cand_indices), max(n * 4, 40))
+        top_k_cand = np.argsort(-scores)[:pool_size]
+        pool_indices = cand_indices[top_k_cand]
+        pool_scores = scores[top_k_cand]
+        pool_ids = [self.idx_to_id[i] for i in pool_indices]
+
+        # 4. MMR diversity re-ranking
+        if lmbda < 1.0 and len(pool_ids) > n:
+            pool_vecs = {
+                self.idx_to_id[i]: np.asarray(self.tfidf_matrix[i].todense()).flatten()
+                for i in pool_indices
+            }
+            final_ids = mmr_rerank(pool_ids, pool_scores.tolist(), pool_vecs, top_k=n, lmbda=lmbda)
+        else:
+            final_ids = pool_ids[:n]
+
+        # 5. Format output cards
+        score_lookup = dict(zip(pool_ids, pool_scores))
+        max_s = float(np.max(pool_scores)) if len(pool_scores) > 0 else 1.0
+        min_s = float(np.min(pool_scores)) if len(pool_scores) > 0 else 0.0
+
+        results = []
+        for mid in final_ids:
+            idx = self.id_to_idx[mid]
+            row = self.df.iloc[idx]
+            raw_s = score_lookup.get(mid, 0.5)
+            pct = int(np.clip(70 + 29 * (raw_s - min_s) / (max_s - min_s + 1e-8), 70, 99))
+            genre_list = [g.strip() for g in row["genres"].split("|") if g.strip()]
+            origin_names = list(row["origin_country_names"])
+            lang_names = list(row["original_language_names"])
+            origin_str = ", ".join(origin_names) if len(origin_names) > 0 else "unknown"
+            language_str = ", ".join(lang_names) if len(lang_names) > 0 else ""
+
+            results.append({
+                "movie_id": str(row["id"]),
+                "imdb_id": str(row["imdb_id"]),
+                "title": str(row["title"]),
+                "year": int(row["year"]),
+                "genres": genre_list,
+                "rating": float(row["rating"]),
+                "votes": int(row["votes"]),
+                "origin_countries": list(row["origin_countries"]),
+                "origin_country_names": origin_names,
+                "original_languages": list(row["original_languages"]),
+                "original_language_names": lang_names,
+                "origin": origin_str,
+                "language_names_str": language_str,
+                "match_pct": pct,
+                "_match_tier": cand_tier_lookup.get(mid, "core"),
+                "explanation": f"Rating {row['rating']}/10 ({row['votes']:,} votes) • Origin: {origin_str} • {', '.join(genre_list[:2])}",
+                "trace": [
+                    {"tool": "content_tfidf", "args": {"mid": mid}, "latency_ms": 1.2},
+                    {"tool": "mmr_diversity", "args": {"lambda": lmbda}, "latency_ms": 0.8},
+                ],
+            })
+
+        return results
