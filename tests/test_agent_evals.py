@@ -361,3 +361,118 @@ def test_godfather_similarity_top_results(agent):
     for c in cards[:5]:
         c_genres = set(c["genres"])
         assert seed_genres.intersection(c_genres), f"{c['title']} does not share any genre with The Godfather"
+
+
+def test_tamil_films_from_90s(agent):
+    """'tamil films from the 90s': every returned film has 'ta' in original_languages and year 1990-1999; no Hindi films."""
+    msg = "tamil films from the 90s"
+    fb_res = agent.route_message(msg)
+    llm_res = agent.route_message_llm(msg)
+
+    fb_ids = [c.get("movie_id", c.get("id")) for c in fb_res.get("cards", [])]
+    llm_ids = [c.get("movie_id", c.get("id")) for c in llm_res.get("cards", [])]
+    assert fb_ids == llm_ids, f"Router mismatch on '{msg}': {fb_ids} vs {llm_ids}"
+
+    cards = fb_res.get("cards", [])
+    assert len(cards) > 0
+    if len(cards) < 5:
+        assert f"I found {len(cards)}" in fb_res["response"]
+
+    unwanted_hindi = {"Dilwale Dulhania Le Jayenge", "Kuch Kuch Hota Hai", "Baazigar", "Dil Se", "Dil Se.."}
+    for c in cards:
+        assert c["title"] not in unwanted_hindi, f"Found unwanted Hindi film {c['title']} in Tamil 90s results"
+        assert "ta" in [str(l).lower() for l in c.get("original_languages", [])], f"{c['title']} missing 'ta' in languages"
+        assert 1990 <= int(c["year"]) <= 1999, f"{c['title']} ({c['year']}) not in 1990-1999"
+
+
+def test_language_and_genre_strictness_queries(agent):
+    """Test explicit languages, genre strictness, and count reporting across both routers."""
+    test_cases = [
+        ("telugu movies", {"lang": "te"}),
+        ("hindi films from the 90s", {"lang": "hi", "min_year": 1990, "max_year": 1999}),
+        ("malayalam movies", {"lang": "ml"}),
+        ("kannada movies", {"lang": "kn"}),
+        ("bengali films", {"lang": "bn"}),
+        ("korean thrillers", {"reg_or_lang": ("KR", "ko"), "genre": "Thriller"}),
+        ("swedish thrillers", {"reg_or_lang": ("SE", "sv"), "genre": "Thriller"}),
+    ]
+
+    for msg, criteria in test_cases:
+        fb_res = agent.route_message(msg)
+        llm_res = agent.route_message_llm(msg)
+
+        fb_ids = [c.get("movie_id", c.get("id")) for c in fb_res.get("cards", [])]
+        llm_ids = [c.get("movie_id", c.get("id")) for c in llm_res.get("cards", [])]
+        assert fb_ids == llm_ids, f"Router mismatch on '{msg}': {fb_ids} vs {llm_ids}"
+
+        cards = fb_res.get("cards", [])
+        assert len(cards) > 0, f"No cards returned for '{msg}'"
+        if len(cards) < 5:
+            assert f"I found {len(cards)}" in fb_res["response"]
+
+        for c in cards:
+            if "lang" in criteria:
+                assert criteria["lang"] in [str(l).lower() for l in c.get("original_languages", [])], f"{c['title']} does not have language {criteria['lang']}"
+            if "min_year" in criteria and "max_year" in criteria:
+                assert criteria["min_year"] <= int(c["year"]) <= criteria["max_year"], f"{c['title']} year {c['year']} outside expected range"
+            if "genre" in criteria:
+                assert criteria["genre"].lower() in [g.lower() for g in c.get("genres", [])], f"{c['title']} missing genre {criteria['genre']}"
+            if "reg_or_lang" in criteria:
+                exp_reg, exp_lang = criteria["reg_or_lang"]
+                has_reg = exp_reg in [str(x).upper() for x in c.get("origin_countries", [])]
+                has_lang = exp_lang in [str(l).lower() for l in c.get("original_languages", [])]
+                assert has_reg or has_lang, f"{c['title']} does not match region {exp_reg} or language {exp_lang}"
+
+
+def test_chinese_martial_arts_genre_mapping(agent):
+    """'chinese martial arts movies': maps martial arts to Action, includes note, cards carry Action."""
+    msg = "chinese martial arts movies"
+    fb_res = agent.route_message(msg)
+    llm_res = agent.route_message_llm(msg)
+
+    fb_ids = [c.get("movie_id", c.get("id")) for c in fb_res.get("cards", [])]
+    llm_ids = [c.get("movie_id", c.get("id")) for c in llm_res.get("cards", [])]
+    assert fb_ids == llm_ids, f"Router mismatch on '{msg}'"
+
+    # Must name the genre mapping used
+    assert "martial arts" in fb_res["response"].lower() and "action" in fb_res["response"].lower()
+    assert "martial arts" in llm_res["response"].lower() and "action" in llm_res["response"].lower()
+
+    cards = fb_res.get("cards", [])
+    assert len(cards) >= 5
+    titles = [c["title"] for c in cards]
+
+    # Non-Action Chinese dramas must not appear
+    assert "Raise the Red Lantern" not in titles
+    assert "The Flowers of War" not in titles
+
+    for c in cards:
+        assert "Action" in c.get("genres", []), f"{c['title']} does not carry mapped Action genre tag"
+
+
+def test_no_internal_tier_jargon_in_replies(agent):
+    """Assert no reply contains 'core films vs' or internal tier debugging jargon."""
+    queries = [
+        "any good tamil films from the 90s",
+        "tamil films from the 90s",
+        "telugu movies",
+        "hindi films from the 90s",
+        "malayalam movies",
+        "kannada movies",
+        "bengali films",
+        "korean thrillers",
+        "swedish thrillers",
+        "chinese martial arts movies",
+        "spanish dramas",
+        "german war films",
+        "horror films from japan",
+        "indian movies",
+    ]
+    jargon_phrases = ["core films vs", "prioritized region", "prioritized language", "_tier_rank", "core_reg"]
+    for q in queries:
+        fb_res = agent.route_message(q)
+        llm_res = agent.route_message_llm(q)
+        for jargon in jargon_phrases:
+            assert jargon not in fb_res.get("response", "").lower(), f"Found jargon '{jargon}' in fallback reply for '{q}'"
+            assert jargon not in llm_res.get("response", "").lower(), f"Found jargon '{jargon}' in LLM reply for '{q}'"
+

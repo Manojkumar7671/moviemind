@@ -113,9 +113,10 @@ class GlobalContentRecommender:
         """Return 'core', 'partial', or None for a catalog row vs a region code."""
         cs = [str(c).upper() for c in (row.get("origin_countries") if isinstance(row, dict) else row["origin_countries"])]
         ls = [str(l).lower() for l in (row.get("original_languages") if isinstance(row, dict) else row["original_languages"])]
-        if region_code not in cs:
+        valid_codes = {"DE", "WEST GERMANY"} if region_code == "DE" else {region_code}
+        if not any(c in valid_codes for c in cs):
             return None
-        if cs and cs[0] == region_code:
+        if cs and cs[0] in valid_codes:
             if len(cs) == 1:
                 return "core"
             primary = self.country_primary_lang.get(region_code)
@@ -132,13 +133,12 @@ class GlobalContentRecommender:
         if lang_code not in ls:
             return None
         if ls and ls[0] == lang_code:
-            if cs:
-                primary = self.country_primary_lang.get(cs[0])
-                if primary == lang_code:
-                    if len(cs) > 1 and _ENGLISH_MAJORS.intersection(cs):
-                        return "partial"
-                    return "core"
-            return "partial"
+            if lang_code != "en":
+                if len(cs) == 1 and cs[0] in _ENGLISH_MAJORS:
+                    return "partial"
+                if len(cs) > 1 and _ENGLISH_MAJORS.intersection(cs):
+                    return "partial"
+            return "core"
         return "partial"
 
     def get_user_profile_vector(

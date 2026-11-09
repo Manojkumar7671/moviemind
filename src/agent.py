@@ -26,14 +26,15 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "artifacts"
 
 # Documented alias mapping for regional demonyms and cultural cinema terms
-# Demonyms map to region; "spanish" maps to ES plus language es (per data-driven spec)
 DEMONYM_ALIASES = {
-    "french": {"region": "FR"},
-    "korean": {"region": "KR"},
-    "japanese": {"region": "JP"},
     "indian": {"region": "IN"},
+    "american": {"region": "US"},
+    "british": {"region": "GB"},
+    "french": {"region": "FR"},
     "german": {"region": "DE"},
     "italian": {"region": "IT"},
+    "japanese": {"region": "JP"},
+    "korean": {"region": "KR"},
     "spanish": {"region": "ES", "language": "es"},
     "mexican": {"region": "MX"},
     "brazilian": {"region": "BR"},
@@ -42,20 +43,20 @@ DEMONYM_ALIASES = {
     "swedish": {"region": "SE"},
     "danish": {"region": "DK"},
     "norwegian": {"region": "NO"},
-    "british": {"region": "GB"},
-    "american": {"region": "US"},
     "canadian": {"region": "CA"},
     "australian": {"region": "AU"},
     "irish": {"region": "IE"},
-    "hindi": {"language": "hi"},
-    "telugu": {"language": "te"},
-    "tamil": {"language": "ta"},
-    "mandarin": {"language": "zh"},
-    "cantonese": {"language": "zh"},
     "bollywood": {"region": "IN", "language": "hi"},
-    "tollywood": {"language": "te"},
-    "kollywood": {"language": "ta"},
     "hollywood": {"region": "US"},
+}
+
+# Documented genre aliases mapping non-catalog tags to canonical catalog genres
+GENRE_ALIASES = {
+    "martial arts": {"genre": "Action", "note": "Mapped 'martial arts' to Action"},
+    "kung fu": {"genre": "Action", "note": "Mapped 'kung fu' to Action"},
+    "rom-com": {"genre": "Comedy", "additional_genre": "Romance", "note": "Mapped 'rom-com' to Comedy and Romance"},
+    "romcom": {"genre": "Comedy", "additional_genre": "Romance", "note": "Mapped 'romcom' to Comedy and Romance"},
+    "anime": {"genre": "Animation", "language": "ja", "note": "Mapped 'anime' to Japanese Animation"},
 }
 
 class MovieMindAgent:
@@ -110,32 +111,39 @@ class MovieMindAgent:
                     if norm_a not in self.global_title_to_id:
                         self.global_title_to_id[norm_a] = gid
 
+            self.code_to_region_name = {}
+            self.code_to_lang_name = {}
+
             for _, row in self.global_df.iterrows():
                 for c, lbl in zip(row.get("origin_countries", []), row.get("origin_country_names", [])):
                     if c:
                         code = str(c).upper()
                         self.region_name_to_code[code.lower()] = code
                         if lbl:
-                            self.region_name_to_code[str(lbl).lower()] = code
-                for c in row.get("origin_countries", []):
-                    if c:
-                        code = str(c).upper()
-                        for lang_lbl in row.get("original_language_names", []):
-                            if lang_lbl:
-                                self.region_name_to_code[str(lang_lbl).lower()] = code
+                            lbl_str = str(lbl).strip()
+                            self.region_name_to_code[lbl_str.lower()] = code
+                            self.code_to_region_name.setdefault(code, lbl_str)
                 for l, lbl in zip(row.get("original_languages", []), row.get("original_language_names", [])):
                     if l:
                         code = str(l).lower()
                         self.lang_name_to_code[code] = code
                         if lbl:
-                            self.lang_name_to_code[str(lbl).lower()] = code
+                            lbl_str = str(lbl).strip()
+                            self.lang_name_to_code[lbl_str.lower()] = code
+                            self.code_to_lang_name.setdefault(code, lbl_str)
+
+            # Documented language aliases (Wikidata label variances)
+            self.lang_name_to_code["bengali"] = "bn"
+            self.code_to_lang_name.setdefault("bn", "Bengali")
+            self.lang_name_to_code["mandarin"] = "zh"
+            self.lang_name_to_code["cantonese"] = "zh"
         else:
+            self.code_to_region_name = {}
+            self.code_to_lang_name = {}
             self.data_min_year = self.ml_min_year
             self.data_max_year = self.ml_max_year
 
         # Build country->primary_language map from SOLE-country films in the global catalog.
-        # Using sole-country films avoids the bias introduced by Hollywood co-productions
-        # (e.g., Tropic Thunder has DE as first country but is fundamentally an English-language film).
         self.country_primary_lang: Dict[str, str] = {}
         if self.global_df is not None:
             from collections import Counter as _Counter, defaultdict as _defaultdict
@@ -148,31 +156,6 @@ class MovieMindAgent:
             self.country_primary_lang = {
                 c: lc.most_common(1)[0][0] for c, lc in _sole_counts.items() if lc
             }
-
-            # Precompute core counts per region and language for ambiguity resolution
-            self._core_region_counts: Dict[str, int] = {}
-            self._core_lang_counts: Dict[str, int] = {}
-            _ENGLISH_MAJORS = {"US", "GB", "AU", "CA"}
-            for _, _row in self.global_df.iterrows():
-                _cs = [str(c).upper() for c in _row.get("origin_countries", []) if c]
-                _ls = [str(l).lower() for l in _row.get("original_languages", []) if l]
-                if _cs:
-                    if len(_cs) == 1:
-                        self._core_region_counts[_cs[0]] = self._core_region_counts.get(_cs[0], 0) + 1
-                    else:
-                        _prim = self.country_primary_lang.get(_cs[0])
-                        if _prim and _ls and _ls[0] == _prim:
-                            self._core_region_counts[_cs[0]] = self._core_region_counts.get(_cs[0], 0) + 1
-                if _ls and _cs:
-                    _prim = self.country_primary_lang.get(_cs[0])
-                    if _prim == _ls[0]:
-                        if not (len(_cs) > 1 and _ENGLISH_MAJORS.intersection(_cs)):
-                            self._core_lang_counts[_ls[0]] = self._core_lang_counts.get(_ls[0], 0) + 1
-        else:
-            self._core_region_counts = {}
-            self._core_lang_counts = {}
-
-        self._last_ambiguity_note: Optional[str] = None
 
         # Common country demonyms
         demonyms = {
@@ -296,21 +279,13 @@ class MovieMindAgent:
     # ------------------------------------------------------------------
 
     def region_match_tier(self, row: Any, region_code: str) -> Optional[str]:
-        """Return 'core', 'partial', or None for a global-catalog row vs a region code.
-
-        Rules (derived from data, see __init__ for country_primary_lang construction):
-        - None:    region_code not present in origin_countries at all.
-        - core:    region_code is origin_countries[0] AND either
-                   (a) the film has only one origin country, OR
-                   (b) the film's first-listed language matches the region's primary language
-                       (derived from sole-country films to avoid Hollywood co-production bias).
-        - partial: region_code is in origin_countries but does not satisfy core criteria.
-        """
+        """Return 'core', 'partial', or None for a global-catalog row vs a region code."""
         cs = [str(c).upper() for c in (row.get("origin_countries") if isinstance(row, dict) else row["origin_countries"])]
         ls = [str(l).lower() for l in (row.get("original_languages") if isinstance(row, dict) else row["original_languages"])]
-        if region_code not in cs:
+        valid_codes = {"DE", "WEST GERMANY"} if region_code == "DE" else {region_code}
+        if not any(c in valid_codes for c in cs):
             return None
-        if cs and cs[0] == region_code:
+        if cs and cs[0] in valid_codes:
             if len(cs) == 1:
                 return "core"
             primary = self.country_primary_lang.get(region_code)
@@ -320,32 +295,20 @@ class MovieMindAgent:
         return "partial"
 
     def language_match_tier(self, row: Any, lang_code: str) -> Optional[str]:
-        """Return 'core', 'partial', or None for a global-catalog row vs a language code.
-
-        Rules (derived from data, see __init__ for country_primary_lang construction):
-        - None:    lang_code not in original_languages.
-        - core:    lang_code is original_languages[0] AND origin_countries[0]'s primary language
-                   (from sole-country films) equals lang_code AND no major English-speaking country
-                   (US, GB, AU, CA) is a co-producer. This excludes Hollywood co-productions
-                   (e.g., Coco [MX,US], Roma [MX,US]) that use a non-English first language but
-                   are fundamentally driven by a US studio.
-        - partial: lang_code present but conditions for core are not satisfied.
-        """
+        """Return 'core', 'partial', or None for a global-catalog row vs a language code."""
         _ENGLISH_MAJORS = {"US", "GB", "AU", "CA"}
         cs = [str(c).upper() for c in (row.get("origin_countries") if isinstance(row, dict) else row["origin_countries"])]
         ls = [str(l).lower() for l in (row.get("original_languages") if isinstance(row, dict) else row["original_languages"])]
         if lang_code not in ls:
             return None
         if ls and ls[0] == lang_code:
-            if cs:
-                primary = self.country_primary_lang.get(cs[0])
-                if primary == lang_code:
-                    # Demote to partial if a major English-speaking country is a co-producer
-                    # (Hollywood co-productions dominate vote counts and crowd out genuine films)
-                    if len(cs) > 1 and _ENGLISH_MAJORS.intersection(cs):
-                        return "partial"
-                    return "core"
-            return "partial"
+            # Non-English language with major English studio backing is demoted to partial
+            if lang_code != "en":
+                if len(cs) == 1 and cs[0] in _ENGLISH_MAJORS:
+                    return "partial"
+                if len(cs) > 1 and _ENGLISH_MAJORS.intersection(cs):
+                    return "partial"
+            return "core"
         return "partial"
 
     def parse_filter_args(self, text: str) -> Dict[str, Any]:
@@ -373,7 +336,7 @@ class MovieMindAgent:
                 args["min_year"] = yr
                 args["max_year"] = yr
 
-        # Genre
+        # Genre & Genre aliases
         all_genres = ["Action", "Adventure", "Animation", "Children's", "Comedy", "Crime", "Documentary", "Drama", "Fantasy", "Film-Noir", "Horror", "Musical", "Mystery", "Romance", "Sci-Fi", "Thriller", "War", "Western"]
         genre_synonyms = {
             "thriller": "Thriller", "thrillers": "Thriller", "detective": "Mystery",
@@ -384,38 +347,57 @@ class MovieMindAgent:
             "action": "Action", "westerns": "Western", "western": "Western",
             "romance": "Romance", "romantic": "Romance", "adventures": "Adventure", "adventure": "Adventure",
         }
+
         matched_genre = None
-        for syn_k, syn_v in genre_synonyms.items():
-            if re.search(rf"\b{re.escape(syn_k)}\b", low):
-                matched_genre = syn_v
+        matched_additional_genre = None
+        genre_mapping_note = None
+        for alias_k, alias_info in GENRE_ALIASES.items():
+            if re.search(rf"\b{re.escape(alias_k)}\b", low):
+                matched_genre = alias_info["genre"]
+                matched_additional_genre = alias_info.get("additional_genre")
+                genre_mapping_note = alias_info["note"]
                 break
+
+        if not matched_genre:
+            for syn_k, syn_v in genre_synonyms.items():
+                if re.search(rf"\b{re.escape(syn_k)}\b", low):
+                    matched_genre = syn_v
+                    break
         if not matched_genre:
             for g in all_genres:
                 if re.search(rf"\b{re.escape(g.lower())}\b", low):
                     matched_genre = g
                     break
+
         if matched_genre:
             args["genre"] = matched_genre
+        if matched_additional_genre:
+            args["additional_genre"] = matched_additional_genre
+        if genre_mapping_note:
+            args["_genre_note"] = genre_mapping_note
 
-        # Region & Language from DEMONYM_ALIASES first
+        # 1. Check demonyms / cultural aliases first (demonyms map to region; e.g. german -> DE, indian -> IN)
         matched_reg = None
         matched_lang = None
         for demonym, info in DEMONYM_ALIASES.items():
             if re.search(rf"\b{re.escape(demonym)}\b", low):
                 matched_reg = info.get("region")
-                matched_lang = info.get("language")
+                if "language" in info:
+                    matched_lang = info.get("language")
                 break
 
-        # Data-driven fallback from region / language names in catalog
-        if not matched_reg:
-            for name_k in sorted(self.region_name_to_code.keys(), key=len, reverse=True):
-                if len(name_k) >= 3 and re.search(rf"\b{re.escape(name_k)}\b", low):
-                    matched_reg = self.region_name_to_code[name_k]
-                    break
+        # 2. Check explicit languages from self.lang_name_to_code if not set by demonym
         if not matched_lang:
             for name_k in sorted(self.lang_name_to_code.keys(), key=len, reverse=True):
                 if len(name_k) >= 3 and re.search(rf"\b{re.escape(name_k)}\b", low):
                     matched_lang = self.lang_name_to_code[name_k]
+                    break
+
+        # 3. Country / Region names from catalog labels
+        if not matched_reg:
+            for name_k in sorted(self.region_name_to_code.keys(), key=len, reverse=True):
+                if len(name_k) >= 3 and re.search(rf"\b{re.escape(name_k)}\b", low):
+                    matched_reg = self.region_name_to_code[name_k]
                     break
 
         reg_match = re.search(r"\bregion\s+([a-zA-Z]{2})\b", low)
@@ -1220,12 +1202,14 @@ class MovieMindAgent:
     def filter_movies(
         self,
         genre: Optional[str] = None,
+        additional_genre: Optional[str] = None,
         min_year: Optional[int] = None,
         max_year: Optional[int] = None,
         year: Optional[int] = None,
         region: Optional[str] = None,
         language: Optional[str] = None,
         limit: int = 5,
+        _genre_note: Optional[str] = None,
     ) -> List[Dict]:
         """Filter movie catalog by genre, year, region, or language using data-driven bounds."""
         if year is not None:
@@ -1246,16 +1230,7 @@ class MovieMindAgent:
             reg_clean = self.region_name_to_code.get(region.strip().lower(), region.strip().upper()) if region else None
             lang_clean = self.lang_name_to_code.get(language.strip().lower(), language.strip().lower()) if language else None
             genre_clean = genre.strip().lower() if genre else None
-
-            # Check and record ambiguity resolution between region and language (e.g. Spanish)
-            self._last_ambiguity_note = None
-            if reg_clean and lang_clean:
-                core_reg = self._core_region_counts.get(reg_clean, 0)
-                core_lang = self._core_lang_counts.get(lang_clean, 0)
-                if core_lang >= core_reg:
-                    self._last_ambiguity_note = f"Spanish cinema: language '{lang_clean}' has {core_lang} core films vs {core_reg} for region '{reg_clean}'; prioritized Spanish-language across all origins"
-                else:
-                    self._last_ambiguity_note = f"Region '{reg_clean}' has {core_reg} core films vs {core_lang} for language '{lang_clean}'; prioritized region '{reg_clean}'"
+            additional_genre_clean = additional_genre.strip().lower() if additional_genre else None
 
             df_sub = self.global_df
             if min_year is not None:
@@ -1263,31 +1238,49 @@ class MovieMindAgent:
             if max_year is not None:
                 df_sub = df_sub[df_sub["year"] <= max_year]
 
-            # Broad candidate filter: any element matches region OR language.
-            # Core/partial tiering applied after.
-            if reg_clean and lang_clean:
-                # Both specified: include any film with either match
-                df_sub = df_sub[
-                    df_sub["origin_countries"].apply(lambda arr: reg_clean in [str(c).upper() for c in arr])
-                    | df_sub["original_languages"].apply(lambda arr: lang_clean in [str(l).lower() for l in arr])
-                ]
-            elif reg_clean:
-                df_sub = df_sub[df_sub["origin_countries"].apply(lambda arr: reg_clean in [str(c).upper() for c in arr])]
-            elif lang_clean:
-                df_sub = df_sub[df_sub["original_languages"].apply(lambda arr: lang_clean in [str(l).lower() for l in arr])]
-
+            # Genre filtering: must carry requested genre tag
             if genre_clean:
-                df_sub = df_sub[df_sub["genres"].str.lower().str.contains(re.escape(genre_clean), na=False)]
+                df_sub = df_sub[df_sub["genres"].str.lower().str.contains(rf"\b{re.escape(genre_clean)}\b", na=False)]
+            if additional_genre_clean:
+                df_sub = df_sub[df_sub["genres"].str.lower().str.contains(rf"\b{re.escape(additional_genre_clean)}\b", na=False)]
 
-            # Assign match tier (core/partial) using data-driven rules derived from sole-country films.
-            # core = the queried region/language is the film's PRIMARY origin, not a secondary co-production credit.
-            # Guarantees Hollywood co-productions (e.g., Tropic Thunder, Wakanda Forever) rank below genuine films.
+            # Region & Language filtering
+            if reg_clean and lang_clean:
+                if reg_clean == "DE":
+                    reg_filter = lambda arr: any(c in {"DE", "WEST GERMANY"} for c in [str(x).upper() for x in arr if x])
+                else:
+                    reg_filter = lambda arr: reg_clean in [str(c).upper() for c in arr if c]
+                df_sub = df_sub[
+                    df_sub["origin_countries"].apply(reg_filter)
+                    | df_sub["original_languages"].apply(lambda arr: lang_clean in [str(l).lower() for l in arr if l])
+                ]
+            elif lang_clean:
+                # Explicit language constraint: NEVER widen silently.
+                df_sub = df_sub[df_sub["original_languages"].apply(lambda arr: lang_clean in [str(l).lower() for l in arr if l])]
+            elif reg_clean:
+                if reg_clean == "DE":
+                    reg_filter = lambda arr: any(c in {"DE", "WEST GERMANY"} for c in [str(x).upper() for x in arr if x])
+                else:
+                    reg_filter = lambda arr: reg_clean in [str(c).upper() for c in arr if c]
+                df_sub = df_sub[df_sub["origin_countries"].apply(reg_filter)]
+
             def _tier(row: Any) -> str:
                 r_tier = self.region_match_tier(row, reg_clean) if reg_clean else None
                 l_tier = self.language_match_tier(row, lang_clean) if lang_clean else None
-                for t in ("core", "partial"):
-                    if r_tier == t or l_tier == t:
-                        return t
+                if reg_clean and lang_clean:
+                    # For Spanish cinema, language is primary across Spain and Latin America
+                    if lang_clean == "es":
+                        if l_tier == "core" or r_tier == "core":
+                            return "core"
+                        return "partial"
+                    # For regional demonyms (e.g. German, French, Korean), primary origin country is required for core
+                    if r_tier == "core":
+                        return "core"
+                    return "partial"
+                elif reg_clean:
+                    return r_tier or "partial"
+                elif lang_clean:
+                    return l_tier or "partial"
                 return "partial"
 
             df_sub = df_sub.copy()
@@ -1306,7 +1299,8 @@ class MovieMindAgent:
                     if lang_clean and lang_clean in [str(l).lower() for l in row["original_languages"]]:
                         ls = [str(l).lower() for l in row["original_languages"]]
                         if ls and ls[0] != lang_clean:
-                            partial_reason = f"also in {lang_clean}"
+                            lang_display = self.code_to_lang_name.get(lang_clean, lang_clean)
+                            partial_reason = f"also in {lang_display}"
                         else:
                             partial_reason = "co-production"
                     else:
@@ -1347,37 +1341,68 @@ class MovieMindAgent:
             })
             if len(results) >= limit:
                 break
-
-        # Fallback to global catalog if zero MovieLens results and global catalog is loaded
-        if not results and self.global_df is not None:
-            genre_clean = genre.strip().lower() if genre else None
-            df_sub = self.global_df
-            if min_year is not None:
-                df_sub = df_sub[df_sub["year"] >= min_year]
-            if max_year is not None:
-                df_sub = df_sub[df_sub["year"] <= max_year]
-            if genre_clean:
-                df_sub = df_sub[df_sub["genres"].str.lower().str.contains(re.escape(genre_clean), na=False)]
-            df_sub = df_sub.sort_values(by="votes", ascending=False)
-            for _, row in df_sub.head(limit).iterrows():
-                origin_names = list(row["origin_country_names"])
-                lang_names = list(row["original_language_names"])
-                results.append({
-                    "movie_id": str(row["id"]),
-                    "title": clean_title(row["title"]),
-                    "genres": [g.strip() for g in str(row["genres"]).split("|") if g.strip()],
-                    "year": int(row["year"]),
-                    "origin_countries": list(row["origin_countries"]),
-                    "origin_country_names": origin_names,
-                    "original_languages": list(row["original_languages"]),
-                    "original_language_names": lang_names,
-                    "origin": ", ".join(origin_names) if origin_names else "unknown",
-                    "rating": float(row.get("rating", 0.0)),
-                    "votes": int(row.get("votes", 0)),
-                    "catalog_source": "World catalog",
-                })
-
         return results
+
+    def _format_filter_response(
+        self,
+        parsed_args: Dict[str, Any],
+        results: List[Dict[str, Any]],
+        source: str = "World catalog",
+    ) -> str:
+        """Format an honest, clean summary for filter query results without internal tier jargon."""
+        total_found = len(results)
+        core_count = sum(1 for r in results if r.get("_match_tier") == "core")
+        partial_count = sum(1 for r in results if r.get("_match_tier") == "partial")
+
+        # Build clean, human-readable query description
+        desc_parts = []
+        if parsed_args.get("genre"):
+            desc_parts.append(str(parsed_args["genre"]))
+        if parsed_args.get("language"):
+            l_code = parsed_args["language"]
+            desc_parts.append(self.code_to_lang_name.get(l_code, str(l_code).capitalize()))
+        elif parsed_args.get("region"):
+            r_code = parsed_args["region"]
+            desc_parts.append(self.code_to_region_name.get(r_code, str(r_code)))
+
+        yr_str = ""
+        if parsed_args.get("min_year") and parsed_args.get("max_year"):
+            if parsed_args["min_year"] == parsed_args["max_year"]:
+                yr_str = f" from {parsed_args['min_year']}"
+            elif parsed_args["max_year"] - parsed_args["min_year"] == 9:
+                yr_str = f" from the {parsed_args['min_year']}s"
+            else:
+                yr_str = f" ({parsed_args['min_year']}-{parsed_args['max_year']})"
+        elif parsed_args.get("year"):
+            yr_str = f" from {parsed_args['year']}"
+
+        query_desc = (" ".join(desc_parts) + f" films{yr_str}").strip()
+        if not query_desc:
+            query_desc = "movies"
+
+        header_lines = []
+        genre_note = parsed_args.get("_genre_note")
+        if genre_note:
+            header_lines.append(f"Note: {genre_note}.")
+
+        limit_req = parsed_args.get("limit", 5)
+        if total_found == 0:
+            header_lines.append(f"No movies matched your filter. I found 0 {query_desc} in the catalog.")
+        elif total_found < limit_req:
+            header_lines.append(f"I found {total_found} {query_desc} in the catalog:")
+        else:
+            header_lines.append(f"From the world catalog ({query_desc}):" if source == "World catalog" else f"From MovieLens 1M ({query_desc}):")
+
+        if core_count > 0 and partial_count > 0:
+            header_lines.append(f"Scope note: Showing {core_count} core matches (primary language/origin) and {partial_count} partial matches (co-production or secondary language).")
+
+        lines = []
+        for r in results:
+            orig = f" [{r['origin']}]" if 'origin' in r else ""
+            part_s = f" ({r['_partial_reason']})" if r.get('_match_tier') == 'partial' and r.get('_partial_reason') else ""
+            lines.append(f"- **{r['title']}** ({r['year']}){orig}{part_s} - [{', '.join(r.get('genres', []))}]")
+
+        return "\n".join(header_lines) + ("\n" + "\n".join(lines) if lines else "")
 
     def get_taste_profile(self, user_id: str) -> Dict[str, Any]:
         """Fetch user taste summary and feedback counts."""
@@ -1591,13 +1616,13 @@ class MovieMindAgent:
             if re.search(rf"\b{re.escape(kw)}\b", low):
                 return True
 
-        # 2. Genres and synonyms
+        # 2. Genres, aliases, and synonyms
         genre_tokens = {
-            "action", "adventure", "animation", "animated", "children", "children's", "kids", "family",
+            "action", "adventure", "animation", "animated", "anime", "children", "children's", "kids", "family",
             "comedy", "comedies", "comic", "funny", "crime", "documentary", "documentaries", "doc",
             "drama", "dramas", "dramatic", "fantasy", "film-noir", "noir", "horror", "scary",
             "musical", "musicals", "mystery", "mysteries", "detective", "romance", "romantic",
-            "rom-com", "sci-fi", "scifi", "science fiction", "space", "lasers", "thriller",
+            "rom-com", "romcom", "martial arts", "kung fu", "sci-fi", "scifi", "science fiction", "space", "lasers", "thriller",
             "thrillers", "suspense", "war", "western", "westerns"
         }
         for gt in genre_tokens:
@@ -2017,9 +2042,10 @@ class MovieMindAgent:
             or (year_match and any(w in low for w in ("from", "before", "after", "since", "released", "in ")))
             or (decade_match is not None)
             or ("newer" in low and ("than" in low or "like" in low))
+            or any(ak in low for ak in GENRE_ALIASES)
         )
 
-        if is_filter_trigger and not (is_rec_intent and not matched_region and not matched_language and not year_match and not decade_match):
+        if is_filter_trigger and not (is_rec_intent and not matched_region and not matched_language and not year_match and not decade_match and not any(ak in low for ak in GENRE_ALIASES)):
             parsed_args = self.parse_filter_args(low)
             if "newer" in low:
                 ref_mid = self.find_movie_id_in_text(low)
@@ -2031,21 +2057,14 @@ class MovieMindAgent:
             results = self.filter_movies(**parsed_args)
             source = "World catalog" if (parsed_args.get("region") or parsed_args.get("language") or (parsed_args.get("min_year") and parsed_args["min_year"] > 2000) or (parsed_args.get("year") and parsed_args["year"] > 2000) or any(r.get("catalog_source") == "World catalog" or "origin_countries" in r for r in results)) else "MovieLens 1M"
             cards = self._format_cards(results, source=source)
-            lines = []
-            for r in results:
-                reg_s = f" [{r['origin']}]" if 'origin' in r else ""
-                part_s = f" ({r['_partial_reason']})" if r.get('_match_tier') == 'partial' and r.get('_partial_reason') else ""
-                lines.append(f"- **{r['title']}** ({r['year']}){reg_s}{part_s} - [{', '.join(r['genres'])}]")
-
             tool_args = {k: v for k, v in parsed_args.items() if v is not None}
-            amb_note = f" ({self._last_ambiguity_note})" if self._last_ambiguity_note else ""
-            prefix = f"From the world catalog{amb_note}:" if source == "World catalog" else "From MovieLens 1M:"
+            resp_text = self._format_filter_response(parsed_args, results, source=source)
             return {
                 "tool": "filter_movies",
                 "args": tool_args,
                 "result": results,
                 "cards": cards,
-                "response": f"{prefix}\n" + ("\n".join(lines) if lines else "No movies matched your filter."),
+                "response": resp_text,
                 "safe": True,
                 "is_adversarial": False,
             }
@@ -2266,29 +2285,7 @@ class MovieMindAgent:
                     ]
 
             if fn_name == "filter_movies":
-                parsed = self.parse_filter_args(user_msg)
-                for k, v in parsed.items():
-                    if v is not None:
-                        fn_args[k] = v
-                if "year" in fn_args and fn_args["year"] is not None:
-                    fn_args.setdefault("min_year", fn_args["year"])
-                    fn_args.setdefault("max_year", fn_args["year"])
-                if "genre" in fn_args and isinstance(fn_args["genre"], str):
-                    fn_args["genre"] = canonical_genres.get(fn_args["genre"].strip().lower(), fn_args["genre"])
-                if "region" in fn_args and isinstance(fn_args["region"], str):
-                    r_raw = fn_args["region"].strip().lower()
-                    if r_raw in DEMONYM_ALIASES:
-                        fn_args["region"] = DEMONYM_ALIASES[r_raw].get("region", fn_args["region"])
-                        if "language" in DEMONYM_ALIASES[r_raw] and "language" not in fn_args:
-                            fn_args["language"] = DEMONYM_ALIASES[r_raw]["language"]
-                    else:
-                        fn_args["region"] = self.region_name_to_code.get(r_raw, fn_args["region"].upper())
-                if "language" in fn_args and isinstance(fn_args["language"], str):
-                    l_raw = fn_args["language"].strip().lower()
-                    if l_raw in DEMONYM_ALIASES:
-                        fn_args["language"] = DEMONYM_ALIASES[l_raw].get("language", fn_args["language"])
-                    else:
-                        fn_args["language"] = self.lang_name_to_code.get(l_raw, l_raw)
+                fn_args = self.parse_filter_args(user_msg)
 
             if fn_name in ("explain", "record_feedback"):
                 mid_val = fn_args.get("movie_id")
@@ -2326,7 +2323,11 @@ class MovieMindAgent:
 
             # Standardize cards & server-templated response sentence
             cards = []
-            if isinstance(tool_result, list) and len(tool_result) > 0 and isinstance(tool_result[0], dict) and "title" in tool_result[0]:
+            if fn_name == "filter_movies":
+                source = tool_result[0].get("catalog_source", "MovieLens 1M") if tool_result else "World catalog"
+                cards = self._format_cards(tool_result, source=source)
+                content = self._format_filter_response(fn_args, tool_result, source=source)
+            elif isinstance(tool_result, list) and len(tool_result) > 0 and isinstance(tool_result[0], dict) and "title" in tool_result[0]:
                 source = tool_result[0].get("catalog_source", "MovieLens 1M")
                 cards = self._format_cards(tool_result, source=source)
                 lines = []
@@ -2334,8 +2335,7 @@ class MovieMindAgent:
                     orig = f" [{r['origin']}]" if 'origin' in r else ""
                     part_s = f" ({r['_partial_reason']})" if r.get('_match_tier') == 'partial' and r.get('_partial_reason') else ""
                     lines.append(f"- **{r['title']}** ({r['year']}){orig}{part_s} - [{', '.join(r.get('genres', []))}]")
-                amb_note = f" ({self._last_ambiguity_note})" if self._last_ambiguity_note else ""
-                prefix = f"From the world catalog{amb_note}:" if source == "World catalog" else "From MovieLens 1M:"
+                prefix = "From the world catalog:" if source == "World catalog" else "From MovieLens 1M:"
                 content = f"{prefix}\n" + "\n".join(lines)
             elif fn_name == "explain":
                 cards = self._format_cards([tool_result], source=tool_result.get("catalog_source", "MovieLens 1M"))
