@@ -2,6 +2,14 @@
 
 **Live demo:** https://moviemind-ng5x.onrender.com (free instance; the first request after idle can take about 50 seconds to wake)
 
+## Screenshots
+
+| Discover | World cinema |
+| :---: | :---: |
+| ![Discover](docs/screenshots/discover.png) | ![World cinema](docs/screenshots/world-cinema.png) |
+| **Taste map** | **Evaluation** |
+| ![Taste map](docs/screenshots/taste-map.png) | ![Evaluation](docs/screenshots/evaluation.png) |
+
 
 [![MovieMind CI](https://github.com/Manojkumar7671/moviemind/actions/workflows/ci.yml/badge.svg)](https://github.com/Manojkumar7671/moviemind/actions/workflows/ci.yml)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
