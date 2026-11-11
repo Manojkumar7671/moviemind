@@ -132,6 +132,15 @@ def build_global_artifacts():
         json.dump(lookups, f)
     print(f"Saved global_lookups.json")
 
+    # Validate output files exist and are non-empty
+    tfidf_file = ARTIFACTS_DIR / "global_tfidf.npz"
+    vec_file = ARTIFACTS_DIR / "global_vectorizer.pkl"
+    lookups_file = ARTIFACTS_DIR / "global_lookups.json"
+    for out_f in [tfidf_file, vec_file, lookups_file]:
+        if not out_f.exists() or out_f.stat().st_size == 0:
+            raise RuntimeError(f"Derived artifact build failed: {out_f} is missing or empty.")
+    print("All derived artifacts successfully verified.")
+
 
 if __name__ == "__main__":
     build_global_artifacts()
