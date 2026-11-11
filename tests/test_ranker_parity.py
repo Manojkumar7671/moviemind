@@ -8,18 +8,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-try:
-    import torch
-    HAS_TORCH = True
-except ImportError:
-    HAS_TORCH = False
+torch = pytest.importorskip("torch", reason="PyTorch not installed in runtime environment")
 
 from src.ranker import NumpyWideAndDeepRanker, WideAndDeepRanker
 
 ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "artifacts"
 
 
-@pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed in runtime environment")
+@pytest.mark.torch
 def test_numpy_wide_and_deep_parity():
     pt_path = ARTIFACTS_DIR / "wide_and_deep.pt"
     npz_path = ARTIFACTS_DIR / "wide_and_deep_weights.npz"

@@ -40,6 +40,11 @@ def test_discover_api_payload_has_no_origin():
         assert "original_language_names" not in r
 
 
+@pytest.mark.needs_catalog
+@pytest.mark.skipif(
+    not (ROOT_DIR / "artifacts" / "global_catalog.parquet").exists(),
+    reason="artifacts/global_catalog.parquet missing (run scripts/build_catalog.py)",
+)
 def test_world_api_payload_has_origin():
     """Verify that World Cinema recommendations API payload includes origin fields."""
     client = TestClient(app)
