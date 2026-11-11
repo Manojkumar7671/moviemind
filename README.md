@@ -1,5 +1,8 @@
 # 🎬 MovieMind
 
+**Live demo:** https://moviemind-ng5x.onrender.com (free instance; the first request after idle can take about 50 seconds to wake)
+
+
 [![MovieMind CI](https://github.com/manojkumarmathangi/moviemind/actions/workflows/ci.yml/badge.svg)](https://github.com/manojkumarmathangi/moviemind/actions/workflows/ci.yml)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
