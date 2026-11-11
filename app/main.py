@@ -36,17 +36,33 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 agent = MovieMindAgent()
-coldstart = ColdStartRecommender()
+coldstart = agent.coldstart
 taste_map_service = TasteMapService()
 
-global_recommender: Optional[GlobalContentRecommender] = None
+
+class LazyGlobalRecommender:
+    """Lazy proxy that defers loading GlobalContentRecommender until first attribute access."""
+    def __init__(self, catalog_path: Path):
+        self._catalog_path = catalog_path
+        self._instance: Optional[GlobalContentRecommender] = None
+
+    @property
+    def is_loaded(self) -> bool:
+        return self._instance is not None
+
+    def _get_instance(self) -> GlobalContentRecommender:
+        if self._instance is None:
+            self._instance = GlobalContentRecommender(self._catalog_path)
+        return self._instance
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._get_instance(), name)
+
+
+global_recommender: Optional[Any] = None
 global_catalog_file = ARTIFACTS_DIR / "global_catalog.parquet"
 if global_catalog_file.exists():
-    try:
-        global_recommender = GlobalContentRecommender(global_catalog_file)
-    except Exception as e:
-        print(f"Warning: could not initialize global recommender: {e}")
-        global_recommender = None
+    global_recommender = LazyGlobalRecommender(global_catalog_file)
 
 class ChatRequest(BaseModel):
     message: str
@@ -72,10 +88,16 @@ def healthcheck():
 
 @app.get("/healthz")
 def healthz():
+    is_loaded = False
+    if global_recommender is not None:
+        if hasattr(global_recommender, "is_loaded"):
+            is_loaded = bool(global_recommender.is_loaded)
+        else:
+            is_loaded = bool(getattr(global_recommender, "df", None) is not None)
     return {
         "status": "ok",
         "llm_configured": bool(agent.client is not None),
-        "world_catalog_loaded": bool(global_recommender is not None and global_recommender.df is not None),
+        "world_catalog_loaded": is_loaded,
     }
 
 @app.get("/api/genres")
@@ -124,8 +146,9 @@ def get_recommendations(user_id: str = "demo_user", n: int = 6):
 @app.get("/api/why-this")
 def get_why_this(movie_id: Any, user_id: str = "demo_user"):
     mid_str = str(movie_id)
-    if global_recommender and mid_str in global_recommender.id_to_idx:
-        row = global_recommender.df.iloc[global_recommender.id_to_idx[mid_str]]
+    gr = global_recommender
+    if gr and mid_str in gr.id_to_idx:
+        row = gr.df.iloc[gr.id_to_idx[mid_str]]
         genres = [g.strip() for g in row["genres"].split("|") if g.strip()]
         orig_names = list(row["origin_country_names"])
         orig_str = ", ".join(orig_names) if len(orig_names) > 0 else "international"
@@ -141,17 +164,18 @@ def get_why_this(movie_id: Any, user_id: str = "demo_user"):
 
 @app.get("/api/global/meta")
 def get_global_meta():
-    if global_recommender is None:
+    gr = global_recommender
+    if gr is None:
         raise HTTPException(
             status_code=503,
             detail="World catalog not built. Run python scripts/build_catalog.py"
         )
     return {
-        "year_min": global_recommender.min_year,
-        "year_max": global_recommender.max_year,
-        "regions": global_recommender.available_regions,
-        "languages": global_recommender.available_languages,
-        "genres": global_recommender.available_genres,
+        "year_min": gr.min_year,
+        "year_max": gr.max_year,
+        "regions": gr.available_regions,
+        "languages": gr.available_languages,
+        "genres": gr.available_genres,
     }
 
 @app.get("/api/global/recommend")
@@ -165,7 +189,8 @@ def get_global_recommend(
     n: int = 12,
     lmbda: float = 0.7,
 ):
-    if global_recommender is None:
+    gr = global_recommender
+    if gr is None:
         raise HTTPException(
             status_code=503,
             detail="World catalog not built. Run python scripts/build_catalog.py"
@@ -181,7 +206,7 @@ def get_global_recommend(
     liked_ids = [str(m) for m in fb["liked"]]
     genres = [g.strip() for g in genre.split(",") if g.strip()] if genre else None
     t0 = time.perf_counter()
-    recs = global_recommender.recommend(
+    recs = gr.recommend(
         liked_ids=liked_ids,
         genres=genres,
         region=region if region and region != "all" else None,

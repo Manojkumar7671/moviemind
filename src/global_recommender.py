@@ -19,30 +19,64 @@ import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 from src.diversity import mmr_rerank
+import json
+import pickle
+import sys
+import scipy.sparse as sp
 
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "artifacts" / "global_catalog.parquet"
+ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "artifacts"
+
+
+def intern_tuple(items):
+    """Convert a sequence of strings into a compact tuple of interned strings."""
+    if items is None:
+        return ()
+    return tuple(sys.intern(str(x)) for x in items if x)
 
 
 class GlobalContentRecommender:
     def __init__(self, catalog_path: Path = CATALOG_PATH):
         self.catalog_path = Path(catalog_path)
-        self.df = pd.read_parquet(self.catalog_path)
+        artifacts_dir = self.catalog_path.parent
+
+        # 1. Load catalog with minimal columns and compact dtypes
+        needed_cols = [
+            "id", "imdb_id", "title", "year", "genres", "rating", "votes",
+            "origin_countries", "origin_country_names", "original_languages", "original_language_names",
+        ]
+        self.df = pd.read_parquet(self.catalog_path, columns=needed_cols)
+        self.df["year"] = self.df["year"].astype(np.int16)
+        self.df["rating"] = self.df["rating"].astype(np.float32)
+        self.df["votes"] = self.df["votes"].astype(np.int32)
+        self.df["origin_countries"] = self.df["origin_countries"].apply(intern_tuple)
+        self.df["origin_country_names"] = self.df["origin_country_names"].apply(intern_tuple)
+        self.df["original_languages"] = self.df["original_languages"].apply(intern_tuple)
+        self.df["original_language_names"] = self.df["original_language_names"].apply(intern_tuple)
+
         self.n_items = len(self.df)
 
         self.id_to_idx = {mid: idx for idx, mid in enumerate(self.df["id"])}
         self.idx_to_id = {idx: mid for idx, mid in enumerate(self.df["id"])}
 
-        # 1. Build text representations for TF-IDF from genres, original_languages, and origin_countries
-        feature_texts = []
-        for _, r in self.df.iterrows():
-            genres = " ".join([f"g_{g.strip().lower()}" for g in r["genres"].split("|") if g.strip()])
-            langs = " ".join([f"l_{str(l).strip().lower()}" for l in r["original_languages"] if str(l).strip()])
-            countries = " ".join([f"c_{str(c).strip().lower()}" for c in r["origin_countries"] if str(c).strip()])
-            tokens = f"{genres} {langs} {countries}".strip()
-            feature_texts.append(tokens if tokens else "empty")
+        # 1. Build text representations for TF-IDF or load precomputed float32 CSR
+        tfidf_path = artifacts_dir / "global_tfidf.npz"
+        vec_path = artifacts_dir / "global_vectorizer.pkl"
+        if tfidf_path.exists() and vec_path.exists():
+            self.tfidf_matrix = sp.load_npz(tfidf_path)
+            with open(vec_path, "rb") as f:
+                self.vectorizer = pickle.load(f)
+        else:
+            feature_texts = []
+            for _, r in self.df.iterrows():
+                genres = " ".join([f"g_{g.strip().lower()}" for g in r["genres"].split("|") if g.strip()])
+                langs = " ".join([f"l_{str(l).strip().lower()}" for l in r["original_languages"] if str(l).strip()])
+                countries = " ".join([f"c_{str(c).strip().lower()}" for c in r["origin_countries"] if str(c).strip()])
+                tokens = f"{genres} {langs} {countries}".strip()
+                feature_texts.append(tokens if tokens else "empty")
 
-        self.vectorizer = TfidfVectorizer(token_pattern=r"(?u)\b\w+\b")
-        self.tfidf_matrix = self.vectorizer.fit_transform(feature_texts)
+            self.vectorizer = TfidfVectorizer(token_pattern=r"(?u)\b\w+\b")
+            self.tfidf_matrix = self.vectorizer.fit_transform(feature_texts).astype(np.float32)
 
         # 2. Bayesian rating/votes prior
         C = float(self.df["rating"].mean())
@@ -52,62 +86,72 @@ class GlobalContentRecommender:
         bayes_rating = (v / (v + m)) * R + (m / (v + m)) * C
         self.prior = np.clip((bayes_rating - 4.0) / 5.5, 0.0, 1.0).astype(np.float32)
 
-        # 3. Dynamic metadata bounds and counts derived from data
-        self.min_year = int(self.df["year"].min())
-        self.max_year = int(self.df["year"].max())
+        # 3. Dynamic metadata bounds and counts derived from data or precomputed lookups
+        lookups_path = artifacts_dir / "global_lookups.json"
+        if lookups_path.exists():
+            with open(lookups_path, "r") as f:
+                lookups = json.load(f)
+            self.min_year = int(lookups["min_year"])
+            self.max_year = int(lookups["max_year"])
+            self.available_regions = lookups["available_regions"]
+            self.available_languages = lookups["available_languages"]
+            self.available_genres = lookups["available_genres"]
+            self.country_primary_lang = lookups["country_primary_lang"]
+        else:
+            self.min_year = int(self.df["year"].min())
+            self.max_year = int(self.df["year"].max())
 
-        region_counts = Counter()
-        region_names: Dict[str, str] = {}
-        for _, row in self.df.iterrows():
-            cs = row["origin_countries"]
-            clbls = row["origin_country_names"]
-            for c, lbl in zip(cs, clbls):
-                if c:
-                    code = str(c).upper()
-                    region_counts[code] += 1
-                    if lbl:
-                        region_names[code] = str(lbl)
+            region_counts = Counter()
+            region_names: Dict[str, str] = {}
+            for _, row in self.df.iterrows():
+                cs = row["origin_countries"]
+                clbls = row["origin_country_names"]
+                for c, lbl in zip(cs, clbls):
+                    if c:
+                        code = str(c).upper()
+                        region_counts[code] += 1
+                        if lbl:
+                            region_names[code] = str(lbl)
 
-        self.available_regions = [
-            {"code": code, "name": region_names.get(code, code), "count": count}
-            for code, count in region_counts.most_common()
-        ]
+            self.available_regions = [
+                {"code": code, "name": region_names.get(code, code), "count": count}
+                for code, count in region_counts.most_common()
+            ]
 
-        lang_counts = Counter()
-        lang_names: Dict[str, str] = {}
-        for _, row in self.df.iterrows():
-            ls = row["original_languages"]
-            llbls = row["original_language_names"]
-            for l, lbl in zip(ls, llbls):
-                if l:
-                    code = str(l).lower()
-                    lang_counts[code] += 1
-                    if lbl:
-                        lang_names[code] = str(lbl)
+            lang_counts = Counter()
+            lang_names: Dict[str, str] = {}
+            for _, row in self.df.iterrows():
+                ls = row["original_languages"]
+                llbls = row["original_language_names"]
+                for l, lbl in zip(ls, llbls):
+                    if l:
+                        code = str(l).lower()
+                        lang_counts[code] += 1
+                        if lbl:
+                            lang_names[code] = str(lbl)
 
-        self.available_languages = [
-            {"code": code, "name": lang_names.get(code, code), "count": count}
-            for code, count in lang_counts.most_common()
-        ]
+            self.available_languages = [
+                {"code": code, "name": lang_names.get(code, code), "count": count}
+                for code, count in lang_counts.most_common()
+            ]
 
-        genre_counts = Counter()
-        for _, row in self.df.iterrows():
-            for g in row["genres"].split("|"):
-                if g.strip():
-                    genre_counts[g.strip()] += 1
-        self.available_genres = [g for g, _ in genre_counts.most_common()]
+            genre_counts = Counter()
+            for _, row in self.df.iterrows():
+                for g in row["genres"].split("|"):
+                    if g.strip():
+                        genre_counts[g.strip()] += 1
+            self.available_genres = [g for g, _ in genre_counts.most_common()]
 
-        # Build country->primary_language map from sole-country films in catalog
-        from collections import defaultdict as _defaultdict
-        sole_counts = _defaultdict(Counter)
-        for _, r in self.df.iterrows():
-            cs = [str(c).upper() for c in r.get("origin_countries", []) if c]
-            ls = [str(l).lower() for l in r.get("original_languages", []) if l]
-            if len(cs) == 1 and ls:
-                sole_counts[cs[0]][ls[0]] += 1
-        self.country_primary_lang = {
-            c: lc.most_common(1)[0][0] for c, lc in sole_counts.items() if lc
-        }
+            from collections import defaultdict as _defaultdict
+            sole_counts = _defaultdict(Counter)
+            for _, r in self.df.iterrows():
+                cs = [str(c).upper() for c in r.get("origin_countries", []) if c]
+                ls = [str(l).lower() for l in r.get("original_languages", []) if l]
+                if len(cs) == 1 and ls:
+                    sole_counts[cs[0]][ls[0]] += 1
+            self.country_primary_lang = {
+                c: lc.most_common(1)[0][0] for c, lc in sole_counts.items() if lc
+            }
 
     def region_match_tier(self, row: Any, region_code: str) -> Optional[str]:
         """Return 'core', 'partial', or None for a catalog row vs a region code."""

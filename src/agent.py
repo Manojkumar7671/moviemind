@@ -74,6 +74,76 @@ def is_gibberish(text: str) -> bool:
             return True
     return False
 
+def intern_tuple(items):
+    """Convert a sequence of strings into a compact tuple of interned strings."""
+    if items is None:
+        return ()
+    return tuple(sys.intern(str(x)) for x in items if x)
+
+
+class GlobalMetaDict:
+    """Memory-efficient view over global_df that materializes row dicts on demand."""
+    def __init__(self, df: pd.DataFrame):
+        self.df = df
+        self._id_to_iloc = {str(mid): i for i, mid in enumerate(df["id"].values)}
+
+    def __contains__(self, key: Any) -> bool:
+        return str(key) in self._id_to_iloc
+
+    def __getitem__(self, key: Any) -> dict:
+        k = str(key)
+        if k not in self._id_to_iloc:
+            raise KeyError(key)
+        iloc = self._id_to_iloc[k]
+        return self.df.iloc[iloc].to_dict()
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        if str(key) in self._id_to_iloc:
+            return self[key]
+        return default
+
+    def __len__(self) -> int:
+        return len(self._id_to_iloc)
+
+    def __bool__(self) -> bool:
+        return bool(self._id_to_iloc)
+
+
+class MMRCache:
+    """Compact 2D int32 array cache for MMR candidates. Uses ~1.15 MB instead of 33 MB."""
+    def __init__(self, arr: np.ndarray):
+        self._arr = arr
+
+    @classmethod
+    def load(cls, parquet_path: Path) -> "MMRCache":
+        df = pd.read_parquet(parquet_path)
+        max_uid = int(df["user_id"].max())
+        cand_lens = [len(c) for c in df["candidate_ids"]]
+        max_len = max(cand_lens) if cand_lens else 50
+        arr = np.zeros((max_uid + 1, max_len), dtype=np.int32)
+        for _, r in df.iterrows():
+            uid = int(r["user_id"])
+            c_ids = r["candidate_ids"]
+            arr[uid, :len(c_ids)] = c_ids
+        return cls(arr)
+
+    def __contains__(self, uid: int) -> bool:
+        return 0 < uid < len(self._arr) and self._arr[uid, 0] != 0
+
+    def __getitem__(self, uid: int) -> List[int]:
+        if uid in self:
+            return self._arr[uid].tolist()
+        raise KeyError(uid)
+
+    def get(self, uid: int, default=None):
+        if uid in self:
+            return self._arr[uid].tolist()
+        return default
+
+    def __len__(self) -> int:
+        return len(self._arr) - 1
+
+
 class MovieMindAgent:
     """Tool-calling Recommender Agent with OpenRouter client and robust fallback."""
     def __init__(self, data_dir: Path = DATA_DIR, artifacts_dir: Path = ARTIFACTS_DIR):
@@ -97,80 +167,36 @@ class MovieMindAgent:
         self.ml_min_year = int(self.movies_df["year"].min())
         self.ml_max_year = int(self.movies_df["year"].max())
 
-        # Global catalog metadata if present
-        global_path = artifacts_dir / "global_catalog.parquet"
-        self.global_meta = {}
-        self.global_df = None
+        # Global catalog metadata (lazy-loaded on first access)
+        self._global_df = None
+        self._global_meta = None
         self.global_title_to_id = {}
         self.region_name_to_code = {}
         self.lang_name_to_code = {}
-        if global_path.exists():
-            self.global_df = pd.read_parquet(global_path)
-            self.global_meta = self.global_df.set_index("id").to_dict(orient="index")
-            self.data_min_year = min(self.ml_min_year, int(self.global_df["year"].min()))
-            self.data_max_year = max(self.ml_max_year, int(self.global_df["year"].max()))
-            
-            # Build fast lookup dictionary sorted by votes descending
-            df_by_votes = self.global_df.sort_values(by="votes", ascending=False)
-            for _, r in df_by_votes.iterrows():
-                gid = str(r["id"])
-                ct = clean_title(r["title"]).lower().strip()
-                if ct not in self.global_title_to_id:
-                    self.global_title_to_id[ct] = gid
-                if ", the" in ct:
-                    norm_t = "the " + ct.replace(", the", "").strip()
-                    if norm_t not in self.global_title_to_id:
-                        self.global_title_to_id[norm_t] = gid
-                if ", a" in ct:
-                    norm_a = "a " + ct.replace(", a", "").strip()
-                    if norm_a not in self.global_title_to_id:
-                        self.global_title_to_id[norm_a] = gid
+        self.code_to_region_name = {}
+        self.code_to_lang_name = {}
+        self.country_primary_lang = {}
 
-            self.code_to_region_name = {}
-            self.code_to_lang_name = {}
-
-            for _, row in self.global_df.iterrows():
-                for c, lbl in zip(row.get("origin_countries", []), row.get("origin_country_names", [])):
-                    if c:
-                        code = str(c).upper()
-                        self.region_name_to_code[code.lower()] = code
-                        if lbl:
-                            lbl_str = str(lbl).strip()
-                            self.region_name_to_code[lbl_str.lower()] = code
-                            self.code_to_region_name.setdefault(code, lbl_str)
-                for l, lbl in zip(row.get("original_languages", []), row.get("original_language_names", [])):
-                    if l:
-                        code = str(l).lower()
-                        self.lang_name_to_code[code] = code
-                        if lbl:
-                            lbl_str = str(lbl).strip()
-                            self.lang_name_to_code[lbl_str.lower()] = code
-                            self.code_to_lang_name.setdefault(code, lbl_str)
-
-            # Documented language aliases (Wikidata label variances)
-            self.lang_name_to_code["bengali"] = "bn"
-            self.code_to_lang_name.setdefault("bn", "Bengali")
-            self.lang_name_to_code["mandarin"] = "zh"
-            self.lang_name_to_code["cantonese"] = "zh"
+        lookups_path = artifacts_dir / "global_lookups.json"
+        if lookups_path.exists():
+            with open(lookups_path, "r") as f:
+                lookups = json.load(f)
+            self.data_min_year = min(self.ml_min_year, int(lookups["min_year"]))
+            self.data_max_year = max(self.ml_max_year, int(lookups["max_year"]))
+            self.region_name_to_code = lookups["region_name_to_code"]
+            self.code_to_region_name = lookups["code_to_region_name"]
+            self.lang_name_to_code = lookups["lang_name_to_code"]
+            self.code_to_lang_name = lookups["code_to_lang_name"]
+            self.country_primary_lang = lookups["country_primary_lang"]
         else:
-            self.code_to_region_name = {}
-            self.code_to_lang_name = {}
             self.data_min_year = self.ml_min_year
             self.data_max_year = self.ml_max_year
 
-        # Build country->primary_language map from SOLE-country films in the global catalog.
-        self.country_primary_lang: Dict[str, str] = {}
-        if self.global_df is not None:
-            from collections import Counter as _Counter, defaultdict as _defaultdict
-            _sole_counts: Dict[str, "_Counter[str]"] = _defaultdict(_Counter)
-            for _, _row in self.global_df.iterrows():
-                _cs = [str(c).upper() for c in _row.get("origin_countries", []) if c]
-                _ls = [str(l).lower() for l in _row.get("original_languages", []) if l]
-                if len(_cs) == 1 and _ls:
-                    _sole_counts[_cs[0]][_ls[0]] += 1
-            self.country_primary_lang = {
-                c: lc.most_common(1)[0][0] for c, lc in _sole_counts.items() if lc
-            }
+        # Documented language aliases (Wikidata label variances)
+        self.lang_name_to_code["bengali"] = "bn"
+        self.code_to_lang_name.setdefault("bn", "Bengali")
+        self.lang_name_to_code["mandarin"] = "zh"
+        self.lang_name_to_code["cantonese"] = "zh"
 
         # Common country demonyms
         demonyms = {
@@ -195,37 +221,30 @@ class MovieMindAgent:
         self.memory = UserMemory()
         self.coldstart = ColdStartRecommender(data_dir, artifacts_dir)
 
-        # Preloaded candidate tables if available
+        # Preloaded candidate tables: compact 2D MMRCache (1.15 MB instead of 33 MB)
         self.mmr_path = artifacts_dir / "mmr_candidates.parquet"
         self.user_recs_cache = {}
         if self.mmr_path.exists():
-            df = pd.read_parquet(self.mmr_path)
-            self.user_recs_cache = {int(r["user_id"]): list(r["candidate_ids"]) for _, r in df.iterrows()}
+            self.user_recs_cache = MMRCache.load(self.mmr_path)
 
         self.genre_vectors = get_genre_matrix(self.movies_df)
 
         # Genre frequency table for MovieLens catalog (used for distinctive-genre filtering in recommend)
-        from collections import Counter as _GenreCounter
         _gc: "dict[str, int]" = {}
         for _meta in self.movie_meta.values():
             for _g in parse_genres(_meta.get("genres", "")):
                 _gc[_g] = _gc.get(_g, 0) + 1
         self._genre_freq: "dict[str, int]" = _gc
 
+        # Serve-time candidates: unused at serve time; drop 280 MB cache
         self.retrieval_path = artifacts_dir / "retrieval_candidates.parquet"
         self.retrieval_cache = {}
-        if self.retrieval_path.exists():
-            df_ret = pd.read_parquet(self.retrieval_path)
-            self.retrieval_cache = {int(r["user_id"]): (list(r["candidate_ids"]), list(r["candidate_scores"])) for _, r in df_ret.iterrows()}
 
         self.ranked_path = artifacts_dir / "ranked_candidates.parquet"
         self.ranked_cache = {}
-        if self.ranked_path.exists():
-            df_rk = pd.read_parquet(self.ranked_path)
-            self.ranked_cache = {int(r["user_id"]): (list(r["candidate_ids"]), list(r["candidate_scores"])) for _, r in df_rk.iterrows()}
 
-        # Item embeddings for similarity explanation
-        self.item_embs = np.load(artifacts_dir / "item_embeddings.npy")
+        # Item embeddings memory-mapped for zero resident RAM duplication
+        self.item_embs = np.load(artifacts_dir / "item_embeddings.npy", mmap_mode="r")
         self.item_ids = np.load(artifacts_dir / "item_ids.npy")
         self.mid_to_idx = {int(mid): idx for idx, mid in enumerate(self.item_ids)}
 
@@ -258,6 +277,65 @@ class MovieMindAgent:
                 print(f"Warning: could not initialize OpenAI client: {e}")
         self._explanation_cache = {}
         self._global_recommender = None
+
+    def _ensure_global_catalog(self):
+        """Lazy-loads World Cinema catalog metadata on first demand."""
+        if self._global_df is not None:
+            return
+        global_path = self.artifacts_dir / "global_catalog.parquet"
+        if not global_path.exists():
+            self._global_df = None
+            self._global_meta = {}
+            return
+
+        needed_cols = [
+            "id", "imdb_id", "title", "year", "genres", "rating", "votes",
+            "origin_countries", "origin_country_names", "original_languages", "original_language_names",
+        ]
+        self._global_df = pd.read_parquet(global_path, columns=needed_cols)
+        self._global_df["year"] = self._global_df["year"].astype(np.int16)
+        self._global_df["rating"] = self._global_df["rating"].astype(np.float32)
+        self._global_df["votes"] = self._global_df["votes"].astype(np.int32)
+        self._global_df["origin_countries"] = self._global_df["origin_countries"].apply(intern_tuple)
+        self._global_df["origin_country_names"] = self._global_df["origin_country_names"].apply(intern_tuple)
+        self._global_df["original_languages"] = self._global_df["original_languages"].apply(intern_tuple)
+        self._global_df["original_language_names"] = self._global_df["original_language_names"].apply(intern_tuple)
+        self._global_meta = GlobalMetaDict(self._global_df)
+
+        df_by_votes = self._global_df.sort_values(by="votes", ascending=False)
+        for _, r in df_by_votes.iterrows():
+            gid = str(r["id"])
+            ct = clean_title(r["title"]).lower().strip()
+            if ct not in self.global_title_to_id:
+                self.global_title_to_id[ct] = gid
+            if ", the" in ct:
+                norm_t = "the " + ct.replace(", the", "").strip()
+                if norm_t not in self.global_title_to_id:
+                    self.global_title_to_id[norm_t] = gid
+            if ", a" in ct:
+                norm_a = "a " + ct.replace(", a", "").strip()
+                if norm_a not in self.global_title_to_id:
+                    self.global_title_to_id[norm_a] = gid
+
+    @property
+    def global_df(self):
+        if self._global_df is None:
+            self._ensure_global_catalog()
+        return self._global_df
+
+    @global_df.setter
+    def global_df(self, val):
+        self._global_df = val
+
+    @property
+    def global_meta(self):
+        if self._global_meta is None:
+            self._ensure_global_catalog()
+        return self._global_meta
+
+    @global_meta.setter
+    def global_meta(self, val):
+        self._global_meta = val
 
     @property
     def global_recommender(self):
