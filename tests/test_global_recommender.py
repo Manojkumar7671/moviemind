@@ -5,8 +5,14 @@ import pandas as pd
 import pytest
 
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "artifacts" / "global_catalog.parquet"
+needs_catalog = pytest.mark.skipif(
+    not CATALOG_PATH.exists(),
+    reason="artifacts/global_catalog.parquet missing (run scripts/build_catalog.py)",
+)
 
 
+@pytest.mark.needs_catalog
+@needs_catalog
 def test_global_catalog_schema_and_size():
     assert CATALOG_PATH.exists(), f"Missing {CATALOG_PATH}"
     size_mb = CATALOG_PATH.stat().st_size / (1024 * 1024)
@@ -40,6 +46,8 @@ def test_global_catalog_schema_and_size():
     assert df["title"].str.strip().ne("").all(), "Titles must not be empty"
 
 
+@pytest.mark.needs_catalog
+@needs_catalog
 def test_global_catalog_known_film_origins():
     df = pd.read_parquet(CATALOG_PATH)
 
@@ -73,6 +81,8 @@ def test_global_catalog_known_film_origins():
     assert "BR" in city["origin_countries"]
 
 
+@pytest.mark.needs_catalog
+@needs_catalog
 def test_global_catalog_coverage_thresholds():
     df = pd.read_parquet(CATALOG_PATH)
     total = len(df)
@@ -84,6 +94,8 @@ def test_global_catalog_coverage_thresholds():
     assert lang_coverage >= 0.92, f"Expected language coverage >= 92%, got {lang_coverage * 100:.2f}%"
 
 
+@pytest.mark.needs_catalog
+@needs_catalog
 def test_global_content_recommender_cold_start():
     from src.global_recommender import GlobalContentRecommender
     rec = GlobalContentRecommender(CATALOG_PATH)
@@ -98,6 +110,8 @@ def test_global_content_recommender_cold_start():
         assert "match_pct" in r
 
 
+@pytest.mark.needs_catalog
+@needs_catalog
 def test_global_recommender_likes_shift_profile():
     from src.global_recommender import GlobalContentRecommender
     rec = GlobalContentRecommender(CATALOG_PATH)
@@ -115,6 +129,8 @@ def test_global_recommender_likes_shift_profile():
     assert "JP" in countries_liked or any("Action" in r["genres"] or "Drama" in r["genres"] for r in recs_liked)
 
 
+@pytest.mark.needs_catalog
+@needs_catalog
 def test_global_recommender_filtering():
     from src.global_recommender import GlobalContentRecommender
     rec = GlobalContentRecommender(CATALOG_PATH)
@@ -147,6 +163,8 @@ def test_global_recommender_filtering():
         assert len(r["origin_countries"]) > 0 or len(r["original_languages"]) > 0
 
 
+@pytest.mark.needs_catalog
+@needs_catalog
 def test_global_api_endpoints():
     from fastapi.testclient import TestClient
     from app.main import app
@@ -194,6 +212,8 @@ def test_global_api_endpoints():
     assert "1954" in why_data["text"] or "Japan" in why_data["text"] or "Seven Samurai" in why_data["text"]
 
 
+@pytest.mark.needs_catalog
+@needs_catalog
 def test_chat_filter_movies_with_region_and_language():
     from src.agent import MovieMindAgent
     agent = MovieMindAgent()

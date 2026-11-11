@@ -5,41 +5,56 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
-import torch
-torch.set_num_threads(1)
-import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
 
 from src.baselines import ALL_GENRES, evaluate_recs, get_genre_matrix
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "artifacts"
 
-class WideAndDeepRanker(nn.Module):
-    def __init__(self, num_users: int = 6050, num_items: int = 4000, wide_dim: int = 4):
-        super().__init__()
-        # Wide part
-        self.wide_linear = nn.Linear(wide_dim, 1)
+_WIDE_AND_DEEP_CLASS = None
 
-        # Deep part
-        self.user_emb = nn.Embedding(num_users + 1, 32)
-        self.item_emb = nn.Embedding(num_items + 1, 32)
-        self.deep_mlp = nn.Sequential(
-            nn.Linear(32 + 32 + wide_dim, 64),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Linear(32, 1),
-        )
 
-    def forward(self, u_ids, i_ids, dense_feats):
-        wide_out = self.wide_linear(dense_feats)
-        u_e = self.user_emb(u_ids)
-        i_e = self.item_emb(i_ids)
-        deep_in = torch.cat([u_e, i_e, dense_feats], dim=1)
-        deep_out = self.deep_mlp(deep_in)
-        return (wide_out + deep_out).squeeze(1)
+def get_wide_and_deep_ranker_class():
+    global _WIDE_AND_DEEP_CLASS
+    if _WIDE_AND_DEEP_CLASS is None:
+        import torch
+        torch.set_num_threads(1)
+        import torch.nn as nn
+
+        class WideAndDeepRanker(nn.Module):
+            def __init__(self, num_users: int = 6050, num_items: int = 4000, wide_dim: int = 4):
+                super().__init__()
+                # Wide part
+                self.wide_linear = nn.Linear(wide_dim, 1)
+
+                # Deep part
+                self.user_emb = nn.Embedding(num_users + 1, 32)
+                self.item_emb = nn.Embedding(num_items + 1, 32)
+                self.deep_mlp = nn.Sequential(
+                    nn.Linear(32 + 32 + wide_dim, 64),
+                    nn.ReLU(),
+                    nn.Dropout(0.1),
+                    nn.Linear(64, 32),
+                    nn.ReLU(),
+                    nn.Linear(32, 1),
+                )
+
+            def forward(self, u_ids, i_ids, dense_feats):
+                wide_out = self.wide_linear(dense_feats)
+                u_e = self.user_emb(u_ids)
+                i_e = self.item_emb(i_ids)
+                deep_in = torch.cat([u_e, i_e, dense_feats], dim=1)
+                deep_out = self.deep_mlp(deep_in)
+                return (wide_out + deep_out).squeeze(1)
+
+        _WIDE_AND_DEEP_CLASS = WideAndDeepRanker
+    return _WIDE_AND_DEEP_CLASS
+
+
+def __getattr__(name: str):
+    if name == "WideAndDeepRanker":
+        return get_wide_and_deep_ranker_class()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class NumpyWideAndDeepRanker:
@@ -130,6 +145,11 @@ def extract_features(
     }
 
 def train_and_rank(data_dir: Path = DATA_DIR, artifacts_dir: Path = ARTIFACTS_DIR, epochs: int = 3):
+    import torch
+    import torch.nn as nn
+    from torch.utils.data import DataLoader, TensorDataset
+    WideAndDeepRanker = get_wide_and_deep_ranker_class()
+
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     train_df = pd.read_parquet(data_dir / "train.parquet")
     test_df = pd.read_parquet(data_dir / "test.parquet")

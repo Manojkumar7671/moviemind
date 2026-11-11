@@ -2,13 +2,14 @@ name: MovieMind CI
 
 on:
   push:
-    branches: [ main, v2-global ]
+    branches: [ main, v2-global, ci-fix ]
   pull_request:
     branches: [ main, v2-global ]
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -22,6 +23,21 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+
+      - name: Cache IMDb raw datasets
+        uses: actions/cache@v4
+        with:
+          path: /tmp/imdb_cache
+          key: imdb-raw-${{ hashFiles('scripts/build_catalog.py') }}-${{ hashFiles('artifacts/wikidata_cache.json') }}
+          restore-keys: |
+            imdb-raw-${{ hashFiles('scripts/build_catalog.py') }}-
+            imdb-raw-
+
+      - name: Build World Cinema Catalog and Derived Artifacts
+        run: |
+          mkdir -p /tmp/imdb_cache
+          python scripts/build_catalog.py --tmp-dir /tmp/imdb_cache
+          python scripts/build_global_tfidf.py
 
       - name: Run Pytest Suite
         run: |

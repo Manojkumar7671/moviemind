@@ -17,7 +17,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 
 @pytest.mark.skipif(
     os.getenv("CI") == "true" or sys.platform != "darwin",
-    reason="macOS local startup RSS test",
+    reason="Startup RSS test skipped in CI (requires local macOS environment)",
 )
 def test_uvicorn_startup_rss_under_450mb():
     port = 8799
