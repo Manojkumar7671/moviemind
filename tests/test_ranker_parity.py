@@ -7,13 +7,19 @@ pure NumPy NumpyWideAndDeepRanker (max abs diff < 1e-5 on 1,000 random inputs).
 from pathlib import Path
 import numpy as np
 import pytest
-import torch
+
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
 
 from src.ranker import NumpyWideAndDeepRanker, WideAndDeepRanker
 
 ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "artifacts"
 
 
+@pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed in runtime environment")
 def test_numpy_wide_and_deep_parity():
     pt_path = ARTIFACTS_DIR / "wide_and_deep.pt"
     npz_path = ARTIFACTS_DIR / "wide_and_deep_weights.npz"
