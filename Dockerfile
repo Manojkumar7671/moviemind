@@ -8,8 +8,8 @@ ENV PYTHONUNBUFFERED=1 \
     KMP_DUPLICATE_LIB_OK=TRUE \
     PORT=7860
 
-# Install dependencies
-COPY requirements.txt .
+# Install runtime dependencies (torch excluded from slim runtime image)
+COPY requirements.txt requirements-train.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Create non-root user (Hugging Face Spaces default UID 1000)
