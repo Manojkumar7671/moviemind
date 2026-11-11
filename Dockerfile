@@ -32,9 +32,6 @@ COPY data/ data/
 COPY artifacts/ artifacts/
 COPY app/ app/
 COPY evals/ evals/
-COPY docs/ docs/
-COPY pytest.ini .
-COPY tests/ tests/
 
 # 5. Non-root user setup (Hugging Face Spaces default UID 1000)
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
@@ -42,7 +39,7 @@ USER appuser
 
 EXPOSE 7860
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
   CMD python3 -c "import urllib.request, os; p = os.getenv('PORT', '7860'); urllib.request.urlopen(f'http://localhost:{p}/healthz')" || exit 1
 
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860}"]
