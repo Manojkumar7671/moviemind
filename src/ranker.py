@@ -41,6 +41,42 @@ class WideAndDeepRanker(nn.Module):
         deep_out = self.deep_mlp(deep_in)
         return (wide_out + deep_out).squeeze(1)
 
+
+class NumpyWideAndDeepRanker:
+    """Pure NumPy inference implementation of Wide&Deep ranker. Zero PyTorch dependency."""
+    def __init__(self, weights: Dict[str, np.ndarray]):
+        self.wide_w = weights["wide_linear.weight"]  # (1, 4)
+        self.wide_b = weights["wide_linear.bias"]    # (1,)
+        self.user_emb = weights["user_emb.weight"]   # (num_users+1, 32)
+        self.item_emb = weights["item_emb.weight"]   # (num_items+1, 32)
+        self.w0 = weights["deep_mlp.0.weight"]       # (64, 68)
+        self.b0 = weights["deep_mlp.0.bias"]         # (64,)
+        self.w1 = weights["deep_mlp.3.weight"]       # (32, 64)
+        self.b1 = weights["deep_mlp.3.bias"]         # (32,)
+        self.w2 = weights["deep_mlp.5.weight"]       # (1, 32)
+        self.b2 = weights["deep_mlp.5.bias"]         # (1,)
+
+    @classmethod
+    def load(cls, weights_path: Path) -> "NumpyWideAndDeepRanker":
+        weights = dict(np.load(weights_path))
+        return cls(weights)
+
+    def score(self, u_ids: np.ndarray, i_ids: np.ndarray, dense_feats: np.ndarray) -> np.ndarray:
+        # Wide branch
+        wide_out = dense_feats @ self.wide_w.T + self.wide_b  # (N, 1)
+        # Deep branch
+        u_e = self.user_emb[u_ids]  # (N, 32)
+        i_e = self.item_emb[i_ids]  # (N, 32)
+        deep_in = np.concatenate([u_e, i_e, dense_feats], axis=1)  # (N, 68)
+        h0 = np.maximum(0.0, deep_in @ self.w0.T + self.b0)  # ReLU
+        h1 = np.maximum(0.0, h0 @ self.w1.T + self.b1)       # ReLU
+        deep_out = h1 @ self.w2.T + self.b2                # (N, 1)
+        return (wide_out + deep_out).squeeze(1)
+
+    def __call__(self, u_ids: np.ndarray, i_ids: np.ndarray, dense_feats: np.ndarray) -> np.ndarray:
+        return self.score(u_ids, i_ids, dense_feats)
+
+
 def extract_features(
     train_df: pd.DataFrame,
     movies_df: pd.DataFrame,
@@ -214,6 +250,10 @@ def train_and_rank(data_dir: Path = DATA_DIR, artifacts_dir: Path = ARTIFACTS_DI
 
     # Save artifacts
     torch.save(ranker.state_dict(), artifacts_dir / "wide_and_deep.pt")
+    np.savez_compressed(
+        artifacts_dir / "wide_and_deep_weights.npz",
+        **{k: v.cpu().numpy() for k, v in ranker.state_dict().items()},
+    )
     ranked_df = pd.DataFrame(ranked_records)
     ranked_df.to_parquet(artifacts_dir / "ranked_candidates.parquet", index=False)
 

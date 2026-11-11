@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 from pathlib import Path
@@ -23,19 +24,28 @@ class ColdStartRecommender:
     """Recommends movies for new users picking 3-5 favourite genres."""
     def __init__(self, data_dir: Path = DATA_DIR, artifacts_dir: Path = ARTIFACTS_DIR):
         self.movies_df = pd.read_parquet(data_dir / "movies.parquet")
-        self.train_df = pd.read_parquet(data_dir / "train.parquet")
-        self.item_embs = np.load(artifacts_dir / "item_embeddings.npy")
+        self.item_embs = np.load(artifacts_dir / "item_embeddings.npy", mmap_mode="r")
         self.item_ids = np.load(artifacts_dir / "item_ids.npy")
-        self.index = faiss.read_index(str(artifacts_dir / "faiss_index.bin"))
+        try:
+            self.index = faiss.read_index(str(artifacts_dir / "faiss_index.bin"), faiss.IO_FLAG_MMAP)
+        except Exception:
+            self.index = faiss.read_index(str(artifacts_dir / "faiss_index.bin"))
 
         # Precompute movie metadata map
         self.movie_meta = self.movies_df.set_index("movie_id").to_dict(orient="index")
         self.mid_to_idx = {int(mid): idx for idx, mid in enumerate(self.item_ids)}
 
-        # Popularity per movie from train
-        counts = self.train_df["movie_id"].value_counts().to_dict()
-        max_c = max(counts.values()) if counts else 1
-        self.log_pop = {mid: np.log1p(counts.get(mid, 0)) / np.log1p(max_c) for mid in self.item_ids}
+        # Popularity per movie from precomputed json or train
+        log_pop_file = artifacts_dir / "log_pop.json"
+        if log_pop_file.exists():
+            with open(log_pop_file, "r") as f:
+                raw_pop = json.load(f)
+            self.log_pop = {int(k): float(v) for k, v in raw_pop.items()}
+        else:
+            train_df = pd.read_parquet(data_dir / "train.parquet")
+            counts = train_df["movie_id"].value_counts().to_dict()
+            max_c = max(counts.values()) if counts else 1
+            self.log_pop = {int(mid): float(np.log1p(counts.get(mid, 0)) / np.log1p(max_c)) for mid in self.item_ids}
 
     def build_profile_vector(self, selected_genres: List[str]) -> np.ndarray:
         """Construct user profile vector as mean embedding of top movies in selected genres."""
