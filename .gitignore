@@ -7,7 +7,11 @@ data/ml-1m/
 data/ml-1m.zip
 data/memory.db
 data/imdb/
+# Derived World Cinema catalog and artifacts (produced by Docker build and README: scripts/build_catalog.py & scripts/build_global_tfidf.py)
 artifacts/global_catalog.parquet
+artifacts/global_tfidf.npz
+artifacts/global_vectorizer.pkl
+artifacts/global_lookups.json
 *.tsv
 *.tsv.gz
 *.egg-info/

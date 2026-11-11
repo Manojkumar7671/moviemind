@@ -145,8 +145,9 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. (Optional) Build world cinema catalog from IMDb datasets
+# 4. Build world cinema catalog and derived TF-IDF artifacts
 python scripts/build_catalog.py
+python scripts/build_global_tfidf.py
 
 # 5. Launch web application
 uvicorn app.main:app --host 0.0.0.0 --port 8000
