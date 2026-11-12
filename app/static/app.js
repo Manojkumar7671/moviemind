@@ -200,6 +200,24 @@ function setupNavigation() {
   if (backdrop) backdrop.addEventListener('click', closeChatDrawer);
 }
 
+let worldPostersPromise = null;
+async function loadWorldPosters() {
+  if (window.WORLD_POSTERS) return window.WORLD_POSTERS;
+  if (!worldPostersPromise) {
+    worldPostersPromise = fetch('/static/world_posters.json?v=3')
+      .then(res => (res.ok ? res.json() : {}))
+      .then(data => {
+        window.WORLD_POSTERS = data || {};
+        return window.WORLD_POSTERS;
+      })
+      .catch(() => {
+        window.WORLD_POSTERS = {};
+        return window.WORLD_POSTERS;
+      });
+  }
+  return worldPostersPromise;
+}
+
 function switchTab(tabName) {
   state.activeTab = tabName;
   document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -213,6 +231,7 @@ function switchTab(tabName) {
     setTimeout(renderTasteMap, 50);
   } else if (tabName === 'world') {
     if (!state.worldLoaded) {
+      loadWorldPosters();
       loadWorldMeta();
       loadWorldRecommendations();
       state.worldLoaded = true;
@@ -424,11 +443,19 @@ function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false, t
         ? movie.original_language_names.join(', ')
         : (movie.language_names_str || '');
 
-      originBadge = ` • <span class="card-origin-region-label" title="${originNames}">Origin: ${originNames}</span>`;
+      originBadge = `<span class="card-origin-region-label" title="${originNames}">Origin: ${originNames}</span>`;
       if (langNames) {
         langChipHtml = `<span class="genre-tag language-tag" title="Original language">${langNames}</span>`;
       }
     }
+
+    const posterKey = ((movie.title || '') + (movie.year || '')).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const posterPath = isWorldCinema
+      ? ((window.WORLD_POSTERS && (window.WORLD_POSTERS[movie.imdb_id] || window.WORLD_POSTERS[movie.movie_id])) || (window.POSTERS && window.POSTERS[posterKey]))
+      : (window.POSTERS && window.POSTERS[posterKey]);
+    const posterImgHtml = posterPath
+      ? `<img class="poster-real" loading="lazy" alt="" src="https://image.tmdb.org/t/p/w342${posterPath}"><div class="poster-shade"></div>`
+      : '';
 
     let traceStepsHtml = '';
     if (trace && trace.length > 0) {
@@ -452,11 +479,13 @@ function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false, t
     }
 
     card.innerHTML = `
-      <div class="poster-frame">${((p)=>p?`<img class="poster-real" loading="lazy" alt="" src="https://image.tmdb.org/t/p/w342${p}"><div class="poster-shade"></div>`:'')(window.POSTERS&&window.POSTERS[(movie.title+movie.year).toLowerCase().replace(/[^a-z0-9]/g,'')])}
+      <div class="poster-frame">${posterImgHtml}
         ${generatePosterSvg(movie.title, movie.year, primaryGenre, movie.movie_id)}
         <div class="poster-content">
           <div class="poster-header">
-            <span class="poster-year">${movie.year}${originBadge}</span>
+            <div class="poster-header-left">
+              <span class="poster-year">${movie.year}</span>${originBadge}
+            </div>
             <span class="poster-match-badge" title="Relative to this list">${movie.match_pct}% match</span>
           </div>
           <div class="poster-title-area">
@@ -590,7 +619,10 @@ async function loadWorldRecommendations() {
   if (yMax) params.set('year_max', yMax);
 
   try {
-    const res = await fetch(`/api/global/recommend?${params.toString()}`);
+    const [res] = await Promise.all([
+      fetch(`/api/global/recommend?${params.toString()}`),
+      loadWorldPosters(),
+    ]);
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
       const msg = errData.detail || "Failed to load world recommendations.";
