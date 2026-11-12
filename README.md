@@ -2,6 +2,8 @@
 
 **Live demo:** https://moviemind-ng5x.onrender.com (free instance; the first request after idle can take about 50 seconds to wake)
 
+![MovieMind demo](docs/demo.gif)
+
 ## Screenshots
 
 | Discover | World cinema |
