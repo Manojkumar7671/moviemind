@@ -1030,5 +1030,77 @@
     "expected_tool": null,
     "adversarial": false,
     "split": "dev"
+  },
+  {
+    "id": "dev_qa_director_batman_begins",
+    "category": "conversation",
+    "message": "which director made batman begins",
+    "expected_tool": null,
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_qa_director_inception",
+    "category": "conversation",
+    "message": "who directed inception",
+    "expected_tool": null,
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_qa_best_movie",
+    "category": "recommend",
+    "message": "best movie",
+    "expected_tool": "recommend",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_qa_top_rated_movies",
+    "category": "recommend",
+    "message": "top rated movies",
+    "expected_tool": "recommend",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_qa_south_indian",
+    "category": "filter",
+    "message": "best south indian movie",
+    "expected_tool": "filter_movies",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_qa_anime",
+    "category": "filter",
+    "message": "good anime movies",
+    "expected_tool": "filter_movies",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_qa_mind_bending_like_interstellar",
+    "category": "recommend",
+    "message": "something mind-bending like interstellar",
+    "expected_tool": "recommend",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_qa_typo_intersteller",
+    "category": "search",
+    "message": "intersteller",
+    "expected_tool": "search_movies",
+    "adversarial": false,
+    "split": "dev"
+  },
+  {
+    "id": "dev_qa_offtopic_who_won_match",
+    "category": "adversarial",
+    "message": "who won the match",
+    "expected_tool": null,
+    "adversarial": true,
+    "split": "dev"
   }
 ]
