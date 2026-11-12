@@ -204,7 +204,7 @@ let worldPostersPromise = null;
 async function loadWorldPosters() {
   if (window.WORLD_POSTERS) return window.WORLD_POSTERS;
   if (!worldPostersPromise) {
-    worldPostersPromise = fetch('/static/world_posters.json?v=3')
+    worldPostersPromise = fetch('/static/world_posters.json?v=4')
       .then(res => (res.ok ? res.json() : {}))
       .then(data => {
         window.WORLD_POSTERS = data || {};
@@ -453,8 +453,9 @@ function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false, t
     const posterPath = isWorldCinema
       ? ((window.WORLD_POSTERS && (window.WORLD_POSTERS[movie.imdb_id] || window.WORLD_POSTERS[movie.movie_id])) || (window.POSTERS && window.POSTERS[posterKey]))
       : (window.POSTERS && window.POSTERS[posterKey]);
+    const safeAlt = String(movie.title || '').replace(/"/g, '&quot;');
     const posterImgHtml = posterPath
-      ? `<img class="poster-real" loading="lazy" alt="" src="https://image.tmdb.org/t/p/w342${posterPath}"><div class="poster-shade"></div>`
+      ? `<img class="poster-real" loading="lazy" alt="${safeAlt} poster" src="https://image.tmdb.org/t/p/w342${posterPath}"><div class="poster-shade"></div>`
       : '';
 
     let traceStepsHtml = '';
