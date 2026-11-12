@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -38,6 +39,19 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 agent = MovieMindAgent()
 coldstart = agent.coldstart
 taste_map_service = TasteMapService()
+
+
+@app.on_event("startup")
+def _preload_world_catalog_bg():
+    """Preload world catalog and precomputed title index in a background daemon thread."""
+    def _warm():
+        try:
+            _ = agent.global_df
+            global_recommender._get_instance()
+        except Exception as exc:
+            print(f"Background preload warning: {exc}")
+
+    threading.Thread(target=_warm, daemon=True).start()
 
 
 class LazyGlobalRecommender:

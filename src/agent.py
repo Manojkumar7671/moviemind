@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import time
+from collections import OrderedDict
 from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
@@ -310,21 +311,35 @@ class MovieMindAgent:
         self._global_df["original_languages"] = self._global_df["original_languages"].apply(intern_tuple)
         self._global_df["original_language_names"] = self._global_df["original_language_names"].apply(intern_tuple)
         self._global_meta = GlobalMetaDict(self._global_df)
+        self._global_titles_lower = self._global_df["title"].str.lower()
+        self._fuzzy_cache: OrderedDict = OrderedDict()
 
-        df_by_votes = self._global_df.sort_values(by="votes", ascending=False)
-        for _, r in df_by_votes.iterrows():
-            gid = str(r["id"])
-            ct = clean_title(r["title"]).lower().strip()
-            for variant in self._title_variants(ct):
-                if variant not in self.global_title_to_id:
-                    self.global_title_to_id[variant] = gid
-                    if len(variant) >= 3:
-                        bkey = (variant[0], len(variant))
-                        self._global_fuzzy_buckets.setdefault(bkey, []).append((variant, gid))
-                        pkey = variant[:3]
-                        plist = self._global_prefix_index.setdefault(pkey, [])
-                        if len(plist) < 50:
-                            plist.append((variant, gid))
+        idx_path = ARTIFACTS_DIR / "global_title_index.json"
+        if idx_path.exists():
+            with open(idx_path, "r") as f:
+                title_entries = json.load(f)
+        else:
+            df_by_votes = self._global_df.sort_values(by="votes", ascending=False)
+            seen_t = set()
+            title_entries = []
+            for _, r in df_by_votes.iterrows():
+                gid = str(r["id"])
+                ct = clean_title(r["title"]).lower().strip()
+                for variant in self._title_variants(ct):
+                    if variant and variant not in seen_t:
+                        seen_t.add(variant)
+                        title_entries.append((variant, gid))
+
+        for variant, gid in title_entries:
+            if variant not in self.global_title_to_id:
+                self.global_title_to_id[variant] = gid
+                if len(variant) >= 3:
+                    bkey = (variant[0], len(variant))
+                    self._global_fuzzy_buckets.setdefault(bkey, []).append((variant, gid))
+                    pkey = variant[:3]
+                    plist = self._global_prefix_index.setdefault(pkey, [])
+                    if len(plist) < 50:
+                        plist.append((variant, gid))
 
     @staticmethod
     def _title_variants(ct: str) -> List[str]:
@@ -336,20 +351,36 @@ class MovieMindAgent:
         return variants
 
     def _fuzzy_world_matches(self, clean_q: str, limit: int = 5) -> List[tuple]:
-        """Return [(ratio, votes, row_dict, gid)] using pre-built length/char & prefix buckets."""
+        """Return [(ratio, votes, row_dict, gid)] using capped bucketed lookup + 512-entry LRU cache."""
         if not clean_q or len(clean_q) < 4:
             return []
         _ = self.global_df  # ensure lazy-loaded
-        cands = {}
+        cache_key = (clean_q, limit)
+        cache = getattr(self, "_fuzzy_cache", None)
+        if cache is not None and cache_key in cache:
+            cache.move_to_end(cache_key)
+            return cache[cache_key]
+
+        cands: Dict[str, str] = {}
         q0 = clean_q[0]
         qlen = len(clean_q)
-        for l_try in range(max(3, qlen - 2), qlen + 3):
+        max_cands = 80
+        # Exact length first, then +/- 1, then +/- 2, then 3-char prefix bucket
+        for l_try in (qlen, qlen - 1, qlen + 1, qlen - 2, qlen + 2):
+            if l_try < 3:
+                continue
             for ct, gid in self._global_fuzzy_buckets.get((q0, l_try), ()):
                 cands[ct] = gid
-        if len(clean_q) >= 3:
+                if len(cands) >= max_cands:
+                    break
+            if len(cands) >= max_cands:
+                break
+        if len(cands) < max_cands and len(clean_q) >= 3:
             for ct, gid in self._global_prefix_index.get(clean_q[:3], ()):
                 if abs(len(ct) - qlen) <= 2:
                     cands[ct] = gid
+                    if len(cands) >= max_cands:
+                        break
         out = []
         for ct, gid in cands.items():
             ratio = difflib.SequenceMatcher(None, clean_q, ct).ratio()
@@ -357,7 +388,12 @@ class MovieMindAgent:
                 r = self.global_meta[gid]
                 out.append((ratio, int(r.get("votes", 0)), r, gid))
         out.sort(key=lambda x: (round(x[0], 2), x[1]), reverse=True)
-        return out[:limit]
+        res = out[:limit]
+        if cache is not None:
+            cache[cache_key] = res
+            if len(cache) > 512:
+                cache.popitem(last=False)
+        return res
 
     @property
     def global_df(self):
@@ -577,66 +613,63 @@ class MovieMindAgent:
             return None
 
         candidates = []
+        title_variants = [clean_q]
+        if clean_q.startswith("the "):
+            title_variants.append(clean_q[4:].strip())
+        else:
+            title_variants.append(f"the {clean_q}")
 
-        # 1. Look in World Catalog (global_df)
+        # 1. O(1) lookup in World Catalog via pre-built global_title_to_id
         if self.global_df is not None:
-            sub = self.global_df[self.global_df["title"].str.lower() == clean_q]
-            if sub.empty and clean_q.startswith("the "):
-                sub = self.global_df[self.global_df["title"].str.lower() == clean_q[4:].strip()]
-            elif sub.empty and not clean_q.startswith("the "):
-                sub = self.global_df[self.global_df["title"].str.lower() == f"the {clean_q}"]
-
-            for _, r in sub.iterrows():
-                gid = str(r["id"])
-                ct = clean_title(r["title"])
-                y = int(r["year"])
-                v = int(r.get("votes", 0))
-                genres = [g.strip() for g in str(r.get("genres", "")).split("|") if g.strip()]
-
-                ml_id = None
-                ct_clean = ct.lower()
-                if ct_clean in self.title_map and int(self.movie_meta[self.title_map[ct_clean]]["year"]) == y:
-                    ml_id = self.title_map[ct_clean]
-                else:
-                    for mid, m_meta in self.movie_meta.items():
-                        if clean_title(m_meta["title"]).lower() == ct_clean and int(m_meta["year"]) == y:
-                            ml_id = int(mid)
-                            break
-
-                candidates.append({
-                    "id": ml_id if ml_id is not None else gid,
-                    "title": ct,
-                    "year": y,
-                    "votes": v,
-                    "genres": genres,
-                    "catalog_source": "MovieLens 1M" if ml_id is not None else "World catalog",
-                    "is_movielens": ml_id is not None,
-                    "ml_id": ml_id,
-                    "global_id": gid,
-                })
-
-        # 2. Look in MovieLens (movie_meta) for any titles not already in candidates
-        for mid, meta in self.movie_meta.items():
-            ct = clean_title(meta["title"]).lower()
-            if ct == clean_q or (clean_q.startswith("the ") and ct == clean_q[4:]) or (not clean_q.startswith("the ") and ct == f"the {clean_q}"):
-                y = int(meta["year"])
-                if not any(c.get("ml_id") == int(mid) for c in candidates):
-                    v = 1000
-                    if self.global_df is not None:
-                        g_match = self.global_df[(self.global_df["title"].str.lower() == ct) & (self.global_df["year"] == y)]
-                        if not g_match.empty:
-                            v = int(g_match.iloc[0].get("votes", 1000))
+            seen_gids = set()
+            for tv in title_variants:
+                gid = self.global_title_to_id.get(tv)
+                if gid and gid not in seen_gids:
+                    seen_gids.add(gid)
+                    r = self.global_meta[gid]
+                    ct = clean_title(r["title"])
+                    y = int(r["year"])
+                    v = int(r.get("votes", 0))
+                    genres = [g.strip() for g in str(r.get("genres", "")).split("|") if g.strip()]
+                    ct_clean = ct.lower()
+                    ml_id = None
+                    if ct_clean in self.title_map and int(self.movie_meta[self.title_map[ct_clean]]["year"]) == y:
+                        ml_id = self.title_map[ct_clean]
                     candidates.append({
-                        "id": int(mid),
-                        "title": clean_title(meta["title"]),
+                        "id": ml_id if ml_id is not None else gid,
+                        "title": ct,
                         "year": y,
                         "votes": v,
-                        "genres": parse_genres(meta.get("genres", "")),
-                        "catalog_source": "MovieLens 1M",
-                        "is_movielens": True,
-                        "ml_id": int(mid),
-                        "global_id": None,
+                        "genres": genres,
+                        "catalog_source": "MovieLens 1M" if ml_id is not None else "World catalog",
+                        "is_movielens": ml_id is not None,
+                        "ml_id": ml_id,
+                        "global_id": gid,
                     })
+
+        # 2. O(1) lookup in MovieLens (title_map) for titles not already in candidates
+        for tv in title_variants:
+            mid = self.title_map.get(tv)
+            if mid is not None and not any(c.get("ml_id") == int(mid) for c in candidates):
+                meta = self.movie_meta[mid]
+                y = int(meta["year"])
+                v = 1000
+                gid_match = self.global_title_to_id.get(tv) if self.global_df is not None else None
+                if gid_match and gid_match in self.global_meta:
+                    gr = self.global_meta[gid_match]
+                    if int(gr.get("year", 0)) == y:
+                        v = int(gr.get("votes", 1000))
+                candidates.append({
+                    "id": int(mid),
+                    "title": clean_title(meta["title"]),
+                    "year": y,
+                    "votes": v,
+                    "genres": parse_genres(meta.get("genres", "")),
+                    "catalog_source": "MovieLens 1M",
+                    "is_movielens": True,
+                    "ml_id": int(mid),
+                    "global_id": None,
+                })
 
         # 3. Fuzzy match fallback if nothing matched exactly
         if not candidates:
@@ -873,9 +906,12 @@ class MovieMindAgent:
                     if matches:
                         return matches
 
-            # Check substring match in global_df (sorted by votes)
+            # Check substring match in global_df (using pre-lowercased Series, non-regex)
             if len(clean_q) >= 3 and not clean_q.isdigit():
-                sub_df = self.global_df[self.global_df["title"].str.lower().str.contains(re.escape(clean_q), na=False)]
+                titles_low = getattr(self, "_global_titles_lower", None)
+                if titles_low is None:
+                    titles_low = self.global_df["title"].str.lower()
+                sub_df = self.global_df[titles_low.str.contains(clean_q, regex=False, na=False)]
                 if not sub_df.empty:
                     top_matches = sub_df.sort_values(by="votes", ascending=False).head(limit)
                     for _, r in top_matches.iterrows():
@@ -1854,20 +1890,27 @@ class MovieMindAgent:
                 return int(resolved["ml_id"])
             return resolved["id"]
 
-        # Check MovieLens title map (longer titles first)
-        for t, mid in sorted(self.title_map.items(), key=lambda x: -len(x[0])):
-            if len(t) >= 4 and re.search(r"\b" + re.escape(t) + r"\b", low):
-                return mid
-        # Check World catalog title map via O(1) exact and n-gram lookup (avoids scanning 33k titles)
+        # Check MovieLens and World catalog title maps via O(1) exact and n-gram lookup
         clean_text = self.clean_search_query(text).lower()
+        if clean_text in self.title_map:
+            return self.title_map[clean_text]
         if clean_text in self.global_title_to_id:
             return self.global_title_to_id[clean_text]
         words = re.findall(r"[a-z0-9'-]+", low)
-        for span in range(min(6, len(words)), 0, -1):
-            for i in range(len(words) - span + 1):
-                cand = " ".join(words[i : i + span])
-                if len(cand) >= 4 and cand in self.global_title_to_id:
-                    return self.global_title_to_id[cand]
+        single_stopwords = {
+            "tell", "pick", "picked", "choose", "chosen", "watch", "good", "best",
+            "make", "makes", "give", "show", "find", "what", "when", "where", "which",
+            "that", "this", "with", "from", "your", "have", "will", "been", "were",
+            "they", "more", "some", "like", "love", "hate", "movie", "movies", "film",
+        }
+        # Prefer MovieLens catalog matches across all spans first, then World catalog
+        for title_dict in (self.title_map, self.global_title_to_id):
+            for span in range(min(6, len(words)), 0, -1):
+                for i in range(len(words) - span + 1):
+                    cand = " ".join(words[i : i + span])
+                    if len(cand) >= 4 and not (span == 1 and cand in single_stopwords):
+                        if cand in title_dict:
+                            return title_dict[cand]
         generic_num = re.search(r"\b(\d{3,6})\b", low)
         if generic_num:
             return int(generic_num.group(1))
