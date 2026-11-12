@@ -1012,10 +1012,29 @@ body.no-anim *, body.no-anim ::before, body.no-anim ::after {
 }
 
 /* Responsive adjustments */
+@media (max-width: 900px) {
+  header.app-header {
+    height: auto;
+    flex-wrap: wrap;
+    padding: var(--space-2) var(--space-4);
+    gap: var(--space-2);
+  }
+  .live-indicator { display: none; }
+  .nav-tabs {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
 @media (max-width: 600px) {
-  header.app-header { padding: 0 var(--space-3); }
-  .nav-tabs { gap: 2px; }
-  .tab-btn { padding: 6px 10px; font-size: 13px; }
+  html, body { overflow-x: hidden; }
+  header.app-header { padding: var(--space-2) var(--space-3); }
+  .brand-title { font-size: 20px; }
+  .nav-tabs { gap: 4px; padding-bottom: 2px; }
+  .tab-btn { padding: 6px 8px; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
+  .app-viewport { padding: var(--space-4) var(--space-3); }
   .movie-grid { grid-template-columns: 1fr; }
   .chat-drawer { width: 100vw; max-width: 100vw; }
 }
