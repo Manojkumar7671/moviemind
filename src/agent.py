@@ -1522,6 +1522,11 @@ class MovieMindAgent:
         if movie_id is None and title:
             movie_id = self.find_movie_id_in_text(title)
         meta = self.movie_meta.get(movie_id)
+        if meta is None and isinstance(movie_id, str) and movie_id.isdigit():
+            int_id = int(movie_id)
+            meta = self.movie_meta.get(int_id)
+            if meta is not None:
+                movie_id = int_id
         if meta is None and self.global_meta:
             meta = self.global_meta.get(str(movie_id))
         if meta is None:

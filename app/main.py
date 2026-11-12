@@ -344,7 +344,11 @@ def chat_endpoint(req: ChatRequest):
 
 @app.post("/api/feedback")
 def feedback_endpoint(req: FeedbackRequest):
-    res = agent.record_feedback(req.user_id or "demo_user", req.movie_id, req.feedback_type)
+    res = agent.record_feedback(
+        req.user_id or "demo_user",
+        movie_id=req.movie_id,
+        feedback_type=req.feedback_type,
+    )
     return res
 
 @app.get("/api/ab")
