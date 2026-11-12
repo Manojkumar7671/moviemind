@@ -452,7 +452,7 @@ function renderMovieGrid(movies, trace = [], latency = {}, isFallback = false, t
     }
 
     card.innerHTML = `
-      <div class="poster-frame">
+      <div class="poster-frame">${((p)=>p?`<img class="poster-real" loading="lazy" alt="" src="https://image.tmdb.org/t/p/w342${p}"><div class="poster-shade"></div>`:'')(window.POSTERS&&window.POSTERS[(movie.title+movie.year).toLowerCase().replace(/[^a-z0-9]/g,'')])}
         ${generatePosterSvg(movie.title, movie.year, primaryGenre, movie.movie_id)}
         <div class="poster-content">
           <div class="poster-header">
