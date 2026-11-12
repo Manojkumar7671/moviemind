@@ -178,6 +178,8 @@ class MovieMindAgent:
         self._global_df = None
         self._global_meta = None
         self.global_title_to_id = {}
+        self._global_fuzzy_buckets = {}
+        self._global_prefix_index = {}
         self.region_name_to_code = {}
         self.lang_name_to_code = {}
         self.code_to_region_name = {}
@@ -313,16 +315,49 @@ class MovieMindAgent:
         for _, r in df_by_votes.iterrows():
             gid = str(r["id"])
             ct = clean_title(r["title"]).lower().strip()
-            if ct not in self.global_title_to_id:
-                self.global_title_to_id[ct] = gid
-            if ", the" in ct:
-                norm_t = "the " + ct.replace(", the", "").strip()
-                if norm_t not in self.global_title_to_id:
-                    self.global_title_to_id[norm_t] = gid
-            if ", a" in ct:
-                norm_a = "a " + ct.replace(", a", "").strip()
-                if norm_a not in self.global_title_to_id:
-                    self.global_title_to_id[norm_a] = gid
+            for variant in self._title_variants(ct):
+                if variant not in self.global_title_to_id:
+                    self.global_title_to_id[variant] = gid
+                    if len(variant) >= 3:
+                        bkey = (variant[0], len(variant))
+                        self._global_fuzzy_buckets.setdefault(bkey, []).append((variant, gid))
+                        pkey = variant[:3]
+                        plist = self._global_prefix_index.setdefault(pkey, [])
+                        if len(plist) < 50:
+                            plist.append((variant, gid))
+
+    @staticmethod
+    def _title_variants(ct: str) -> List[str]:
+        variants = [ct]
+        if ", the" in ct:
+            variants.append("the " + ct.replace(", the", "").strip())
+        if ", a" in ct:
+            variants.append("a " + ct.replace(", a", "").strip())
+        return variants
+
+    def _fuzzy_world_matches(self, clean_q: str, limit: int = 5) -> List[tuple]:
+        """Return [(ratio, votes, row_dict, gid)] using pre-built length/char & prefix buckets."""
+        if not clean_q or len(clean_q) < 4:
+            return []
+        _ = self.global_df  # ensure lazy-loaded
+        cands = {}
+        q0 = clean_q[0]
+        qlen = len(clean_q)
+        for l_try in range(max(3, qlen - 2), qlen + 3):
+            for ct, gid in self._global_fuzzy_buckets.get((q0, l_try), ()):
+                cands[ct] = gid
+        if len(clean_q) >= 3:
+            for ct, gid in self._global_prefix_index.get(clean_q[:3], ()):
+                if abs(len(ct) - qlen) <= 2:
+                    cands[ct] = gid
+        out = []
+        for ct, gid in cands.items():
+            ratio = difflib.SequenceMatcher(None, clean_q, ct).ratio()
+            if ratio >= 0.80:
+                r = self.global_meta[gid]
+                out.append((ratio, int(r.get("votes", 0)), r, gid))
+        out.sort(key=lambda x: (round(x[0], 2), x[1]), reverse=True)
+        return out[:limit]
 
     @property
     def global_df(self):
@@ -804,6 +839,40 @@ class MovieMindAgent:
                 })
                 return matches
 
+            # Prefix match via pre-built prefix index before full df scan
+            if len(clean_q) >= 3 and not clean_q.isdigit():
+                pref_hits = [
+                    gid for ct, gid in self._global_prefix_index.get(clean_q[:3], ())
+                    if ct.startswith(clean_q)
+                ]
+                if pref_hits:
+                    seen_g = set()
+                    for gid in pref_hits:
+                        if gid in seen_g:
+                            continue
+                        seen_g.add(gid)
+                        r = self.global_meta[gid]
+                        origin_names = list(r["origin_country_names"])
+                        lang_names = list(r["original_language_names"])
+                        matches.append({
+                            "movie_id": str(r.get("id", gid)),
+                            "title": clean_title(r["title"]),
+                            "genres": [g.strip() for g in str(r["genres"]).split("|") if g.strip()],
+                            "year": int(r["year"]),
+                            "origin_countries": list(r["origin_countries"]),
+                            "origin_country_names": origin_names,
+                            "original_languages": list(r["original_languages"]),
+                            "original_language_names": lang_names,
+                            "origin": ", ".join(origin_names) if origin_names else "unknown",
+                            "rating": float(r.get("rating", 0.0)),
+                            "votes": int(r.get("votes", 0)),
+                            "catalog_source": "World catalog",
+                        })
+                        if len(matches) >= limit:
+                            break
+                    if matches:
+                        return matches
+
             # Check substring match in global_df (sorted by votes)
             if len(clean_q) >= 3 and not clean_q.isdigit():
                 sub_df = self.global_df[self.global_df["title"].str.lower().str.contains(re.escape(clean_q), na=False)]
@@ -828,38 +897,27 @@ class MovieMindAgent:
                         })
                     return matches
 
-            # Fuzzy title fallback in World Catalog (e.g. 'intersteller' -> 'Interstellar', 'incpetion' -> 'Inception')
-            if len(clean_q) >= 4 and not clean_q.isdigit():
-                fuzzy_cands = []
-                for ct, gid in self.global_title_to_id.items():
-                    if abs(len(ct) - len(clean_q)) > 2:
-                        continue
-                    if ct[0] != clean_q[0] and difflib.SequenceMatcher(None, clean_q[:3], ct[:3]).ratio() < 0.5:
-                        continue
-                    ratio = difflib.SequenceMatcher(None, clean_q, ct).ratio()
-                    if ratio >= 0.80:
-                        r = self.global_meta[gid]
-                        fuzzy_cands.append((ratio, int(r.get("votes", 0)), r, gid))
-                if fuzzy_cands:
-                    fuzzy_cands.sort(key=lambda x: (round(x[0], 2), x[1]), reverse=True)
-                    for _, _, r, gid in fuzzy_cands[:limit]:
-                        origin_names = list(r["origin_country_names"])
-                        lang_names = list(r["original_language_names"])
-                        matches.append({
-                            "movie_id": str(r.get("id", gid)),
-                            "title": clean_title(r["title"]),
-                            "genres": [g.strip() for g in str(r["genres"]).split("|") if g.strip()],
-                            "year": int(r["year"]),
-                            "origin_countries": list(r["origin_countries"]),
-                            "origin_country_names": origin_names,
-                            "original_languages": list(r["original_languages"]),
-                            "original_language_names": lang_names,
-                            "origin": ", ".join(origin_names) if origin_names else "unknown",
-                            "rating": float(r.get("rating", 0.0)),
-                            "votes": int(r.get("votes", 0)),
-                            "catalog_source": "World catalog",
-                        })
-                    return matches
+            # Fuzzy title fallback in World Catalog using bucketed index
+            fuzzy_cands = self._fuzzy_world_matches(clean_q, limit=limit)
+            if fuzzy_cands:
+                for _, _, r, gid in fuzzy_cands:
+                    origin_names = list(r["origin_country_names"])
+                    lang_names = list(r["original_language_names"])
+                    matches.append({
+                        "movie_id": str(r.get("id", gid)),
+                        "title": clean_title(r["title"]),
+                        "genres": [g.strip() for g in str(r["genres"]).split("|") if g.strip()],
+                        "year": int(r["year"]),
+                        "origin_countries": list(r["origin_countries"]),
+                        "origin_country_names": origin_names,
+                        "original_languages": list(r["original_languages"]),
+                        "original_language_names": lang_names,
+                        "origin": ", ".join(origin_names) if origin_names else "unknown",
+                        "rating": float(r.get("rating", 0.0)),
+                        "votes": int(r.get("votes", 0)),
+                        "catalog_source": "World catalog",
+                    })
+                return matches
 
         return matches
 
@@ -1800,13 +1858,16 @@ class MovieMindAgent:
         for t, mid in sorted(self.title_map.items(), key=lambda x: -len(x[0])):
             if len(t) >= 4 and re.search(r"\b" + re.escape(t) + r"\b", low):
                 return mid
-        # Check World catalog title map
+        # Check World catalog title map via O(1) exact and n-gram lookup (avoids scanning 33k titles)
         clean_text = self.clean_search_query(text).lower()
         if clean_text in self.global_title_to_id:
             return self.global_title_to_id[clean_text]
-        for t, g_id in sorted(self.global_title_to_id.items(), key=lambda x: -len(x[0])):
-            if len(t) >= 5 and re.search(r"\b" + re.escape(t) + r"\b", low):
-                return g_id
+        words = re.findall(r"[a-z0-9'-]+", low)
+        for span in range(min(6, len(words)), 0, -1):
+            for i in range(len(words) - span + 1):
+                cand = " ".join(words[i : i + span])
+                if len(cand) >= 4 and cand in self.global_title_to_id:
+                    return self.global_title_to_id[cand]
         generic_num = re.search(r"\b(\d{3,6})\b", low)
         if generic_num:
             return int(generic_num.group(1))
@@ -1887,10 +1948,8 @@ class MovieMindAgent:
             return True
         clean_q = re.sub(r"[^a-z0-9\s'-]", "", low).strip()
         if len(clean_q) >= 4 and len(clean_q.split()) <= 3:
-            for ct in self.global_title_to_id:
-                if abs(len(ct) - len(clean_q)) <= 2 and ct[0] == clean_q[0]:
-                    if difflib.SequenceMatcher(None, clean_q, ct).ratio() >= 0.80:
-                        return True
+            if self._fuzzy_world_matches(clean_q, limit=1):
+                return True
             for ct in self.title_map:
                 if abs(len(ct) - len(clean_q)) <= 2 and ct[0] == clean_q[0]:
                     if difflib.SequenceMatcher(None, clean_q, ct).ratio() >= 0.82:
@@ -2805,6 +2864,15 @@ class MovieMindAgent:
         # Check similar-to
         sim_pattern = r"^(?:can you\s+)?(?:please\s+)?(?:suggest|recommend|give me|show me|find)?\s*(?:something|movies?|films?|picks?|more)(?:\s+[a-z-]+){0,3}\s+(?:like|similar to)\s+(.*)"
         if re.search(sim_pattern, low) and "newer" not in low:
+            return self.route_message(user_msg, user_id=user_id)
+
+        # Fast-path short title / fuzzy title searches without Groq LLM round-trip
+        clean_short = self.clean_search_query(user_msg).lower().strip()
+        if clean_short and len(clean_short.split()) <= 3 and (
+            clean_short in self.title_map
+            or clean_short in self.global_title_to_id
+            or bool(self._fuzzy_world_matches(clean_short, limit=1))
+        ):
             return self.route_message(user_msg, user_id=user_id)
 
         # Check year 2026 or world catalog year
