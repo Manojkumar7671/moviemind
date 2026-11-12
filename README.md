@@ -175,3 +175,4 @@ MovieMind utilizes public academic and open-knowledge datasets under their respe
 - **MovieLens 1M**: GroupLens Research, University of Minnesota. Used for academic research and educational demonstration.
 - **IMDb Datasets**: Information courtesy of IMDb (https://www.imdb.com/interfaces/). Used under IMDb non-commercial dataset terms (personal and non-commercial use only). The IMDb derivative parquet artifact is kept out of the repository so IMDb data is not redistributed; it is rebuilt from the official dataset files.
 - **Wikidata**: Creative Commons CC0 1.0 Universal Public Domain Dedication (https://creativecommons.org/publicdomain/zero/1.0/). Origin country and original language metadata are CC0.
+- **TMDB**: Movie poster artwork via the TMDB API. This product uses the TMDB API but is not endorsed or certified by TMDB.
