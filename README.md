@@ -4,6 +4,23 @@
 
 ![MovieMind demo](docs/demo.gif)
 
+## AIML-03 Capstone Mapping
+
+| Step | What I built | Where in repo |
+| :--- | :--- | :--- |
+| **Dataset & time-based split** | Strict per-user chronological leave-one-out split on MovieLens 1M (latest interaction = test, second-latest = val, remaining = train; zero future leakage), plus a 33,485-film IMDb + Wikidata World Cinema catalog. | [`src/download.py`](src/download.py), [`src/prepare.py`](src/prepare.py), [`scripts/build_catalog.py`](scripts/build_catalog.py) |
+| **Feature pipeline (Spark)** | **Stand-in: Pandas + NumPy** (`extract_features` computes genre multi-hot vectors, log-popularity, recency, and normalized user-genre affinity). MovieLens 1M (~1M rows, ~3.9k items) fits in memory in <1s without JVM/Spark cluster overhead. | [`src/ranker.py`](src/ranker.py), [`scripts/build_global_tfidf.py`](scripts/build_global_tfidf.py) |
+| **Two-tower retrieval** | PyTorch `UserTower` & `ItemTower` trained with in-batch softmax contrastive loss to produce 64-d L2-normalized embeddings. | [`src/retrieval.py`](src/retrieval.py), [`artifacts/item_embeddings.npy`](artifacts/item_embeddings.npy) |
+| **FAISS index** | Exact inner-product `faiss.IndexFlatIP` index built over 64-d item embeddings for sub-millisecond Top-200 candidate retrieval on CPU. | [`src/retrieval.py`](src/retrieval.py), [`src/coldstart.py`](src/coldstart.py), [`artifacts/faiss_index.bin`](artifacts/faiss_index.bin) |
+| **Wide&Deep ranker** | PyTorch `WideAndDeepRanker` combining linear dense features with user/item embeddings + 2-layer ReLU MLP; exported to `NumpyWideAndDeepRanker` for torch-free serving (~268 MB RSS). | [`src/ranker.py`](src/ranker.py), [`scripts/export_ranker_numpy.py`](scripts/export_ranker_numpy.py), [`artifacts/wide_and_deep_weights.npz`](artifacts/wide_and_deep_weights.npz) |
+| **Cold-start fallback & cache (Redis)** | **Stand-in: FAISS genre-centroid `ColdStartRecommender` + SQLite (`memory.db`) & in-process Python `dict` caches** (for retrieval/ranked candidates and LLM explanations) instead of Redis, avoiding a separate cache daemon on a single 512 MB instance. | [`src/coldstart.py`](src/coldstart.py), [`src/memory.py`](src/memory.py), [`src/agent.py`](src/agent.py) |
+| **Serving (Triton)** | **Stand-in: FastAPI + Uvicorn** serving precomputed NumPy ranker weights, FAISS CPU index, and TF-IDF matrices directly in-process instead of Triton Inference Server, eliminating multi-container/gRPC overhead on CPU-only hosting. | [`app/main.py`](app/main.py), [`Dockerfile`](Dockerfile) |
+| **Retraining (Airflow)** | **Stand-in: CLI scripts + GitHub Actions CI** (`src/retrieval.py`, `src/ranker.py`, `scripts/build_catalog.py`, `scripts/build_global_tfidf.py`) instead of Airflow DAGs, since MovieLens 1M is static and the World catalog is rebuilt deterministically at image/CI build time. | [`scripts/build_catalog.py`](scripts/build_catalog.py), [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
+| **Simple A/B test** | **Stand-in: Offline position-biased click simulation** (`N=5,000` synthetic sessions with `1 / log2(rank + 1)` examination bias comparing Popularity vs. Two-Stage + MMR) instead of live user traffic. | [`src/ab_sim.py`](src/ab_sim.py), [`artifacts/ab_results.json`](artifacts/ab_results.json) |
+| **Metrics (NDCG, Recall@K, CTR)** | Computes `Recall@10/50`, `NDCG@10/50`, `Coverage`, `Novelty`, and `ILD` (intra-list diversity) across all 4 pipeline stages, plus simulated CTR lift and Wilson CIs. | [`src/evaluate.py`](src/evaluate.py), [`src/baselines.py`](src/baselines.py), [`src/global_eval.py`](src/global_eval.py) |
+
+Additional project docs: [System Architecture (Mermaid diagram)](docs/architecture.md) · [Offline Ablation Results & Numbers](docs/results.md) · [Design & Implementation Reflection](docs/reflection.md)
+
 ## Screenshots
 
 | Discover | World cinema |
