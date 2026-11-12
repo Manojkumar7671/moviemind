@@ -132,11 +132,33 @@ def build_global_artifacts():
         json.dump(lookups, f)
     print(f"Saved global_lookups.json")
 
+    # Precompute normalized title index sorted by votes descending for fast startup & fuzzy lookup
+    import re as _re
+    df_by_votes = df.sort_values(by="votes", ascending=False)
+    seen_titles = set()
+    title_entries = []
+    for _, r in df_by_votes.iterrows():
+        gid = str(r["id"])
+        ct = _re.sub(r"\s+\(\d{4}\)$", "", str(r["title"]).strip()).lower().strip()
+        variants = [ct]
+        if ", the" in ct:
+            variants.append("the " + ct.replace(", the", "").strip())
+        if ", a" in ct:
+            variants.append("a " + ct.replace(", a", "").strip())
+        for v in variants:
+            if v and v not in seen_titles:
+                seen_titles.add(v)
+                title_entries.append([v, gid])
+    with open(ARTIFACTS_DIR / "global_title_index.json", "w") as f:
+        json.dump(title_entries, f)
+    print(f"Saved global_title_index.json ({len(title_entries)} entries)")
+
     # Validate output files exist and are non-empty
     tfidf_file = ARTIFACTS_DIR / "global_tfidf.npz"
     vec_file = ARTIFACTS_DIR / "global_vectorizer.pkl"
     lookups_file = ARTIFACTS_DIR / "global_lookups.json"
-    for out_f in [tfidf_file, vec_file, lookups_file]:
+    title_idx_file = ARTIFACTS_DIR / "global_title_index.json"
+    for out_f in [tfidf_file, vec_file, lookups_file, title_idx_file]:
         if not out_f.exists() or out_f.stat().st_size == 0:
             raise RuntimeError(f"Derived artifact build failed: {out_f} is missing or empty.")
     print("All derived artifacts successfully verified.")

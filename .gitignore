@@ -17,3 +17,4 @@ artifacts/global_lookups.json
 *.egg-info/
 .DS_Store
 .env.local
+artifacts/global_title_index.json

@@ -25,7 +25,8 @@ RUN python scripts/build_catalog.py --clean-raw && \
     (test -s artifacts/global_catalog.parquet || (echo "FATAL: artifacts/global_catalog.parquet is missing or empty" && exit 1)) && \
     (test -s artifacts/global_tfidf.npz || (echo "FATAL: artifacts/global_tfidf.npz is missing or empty" && exit 1)) && \
     (test -s artifacts/global_vectorizer.pkl || (echo "FATAL: artifacts/global_vectorizer.pkl is missing or empty" && exit 1)) && \
-    (test -s artifacts/global_lookups.json || (echo "FATAL: artifacts/global_lookups.json is missing or empty" && exit 1))
+    (test -s artifacts/global_lookups.json || (echo "FATAL: artifacts/global_lookups.json is missing or empty" && exit 1)) && \
+    (test -s artifacts/global_title_index.json || (echo "FATAL: artifacts/global_title_index.json is missing or empty" && exit 1))
 
 # 4. Copy rest of the application code, precomputed artifacts, evaluations, and data
 COPY data/ data/

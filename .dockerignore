@@ -12,3 +12,4 @@ artifacts/global_catalog.parquet
 artifacts/global_tfidf.npz
 artifacts/global_vectorizer.pkl
 artifacts/global_lookups.json
+artifacts/global_title_index.json
