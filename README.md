@@ -17,7 +17,7 @@
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **A production-grade, two-stage movie recommendation engine (Two-Tower retrieval + Wide&Deep ranker + MMR diversity) coupled with a factual tool-calling chat agent and an interactive screening-room UI.**
+> **An end-to-end, two-stage movie recommendation engine (Two-Tower retrieval + Wide&Deep ranker + MMR diversity) coupled with a factual tool-calling chat agent and an interactive screening-room UI.**
 
 ---
 
@@ -114,7 +114,7 @@ For each target film $T$:
 The A/B test reported on the `/ab` dashboard is explicitly **SIMULATED**:
 - **Setup**: Evaluated across $N=5,000$ synthetic user sessions drawn from held-out interactions.
 - **Click Probability Model**: Position-biased examination probability model ($1 / \log_2(\text{rank} + 1)$) combined with item relevance.
-- **Result**: +11.18% relative CTR lift ($p = 0.0002$, two-sided t-test, 95% CI: `[+0.52%, +2.14%]`).
+- **Result**: +0.95 percentage points absolute CTR lift (`9.42%` vs `8.48%`, 95% CI: `[+0.45 pp, +1.45 pp]`, $p = 0.0002$), corresponding to a **+11.18% relative CTR lift** (95% CI: `[+5.3%, +17.1%]`).
 - **Disclaimer**: This is a mathematically grounded offline simulation designed to evaluate ranking mechanics, **not live production user traffic**.
 
 ---
