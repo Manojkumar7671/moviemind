@@ -204,7 +204,7 @@ let worldPostersPromise = null;
 async function loadWorldPosters() {
   if (window.WORLD_POSTERS) return window.WORLD_POSTERS;
   if (!worldPostersPromise) {
-    worldPostersPromise = fetch('/static/world_posters.json?v=5')
+    worldPostersPromise = fetch('/static/world_posters.json?v=6')
       .then(res => (res.ok ? res.json() : {}))
       .then(data => {
         window.WORLD_POSTERS = data || {};
