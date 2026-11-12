@@ -138,9 +138,9 @@ The A/B test reported on the `/ab` dashboard is explicitly **SIMULATED**:
 
 ## 🤖 Agent Evaluation Suite (Held-Out Benchmark & Dev Split)
 
-The MovieMind agent features an automated test suite (`evals/cases.json`, run via `pytest tests/test_agent_evals.py` or `python scripts/run_agent_evals.py`) containing **70 total evaluation cases**:
+The MovieMind agent features an automated test suite (`evals/cases.json`, run via `pytest tests/test_agent_evals.py` or `python scripts/run_agent_evals.py`) containing **94 total evaluation cases**:
 - **Held-Out Split (15 cases)**: Independent test cases with unseen user phrasings across search, recommend, explain, filter, feedback, profile, ambiguous, and off-topic adversarial queries.
-- **Development Split (55 cases)**: Regression and unit cases covering typo resolution, multi-step actions, intent words (`best movies`, `top rated`), catalog year boundaries (`2026`, `movies in 2026`), and regional queries (`telugu movies from 2015`, `korean thrillers`).
+- **Development Split (79 cases)**: Regression and unit cases covering typo resolution, multi-step actions, intent words (`best movies`, `top rated`), catalog year boundaries (`2026`, `movies in 2026`), regional queries (`telugu movies from 2015`, `korean thrillers`, `best south indian movie`, `good anime movies`), director queries, and conversational follow-ups.
 
 ### Held-Out Benchmark Performance
 
@@ -148,7 +148,7 @@ The MovieMind agent features an automated test suite (`evals/cases.json`, run vi
 | :--- | :---: | :---: | :---: |
 | **LLM Tool-Calling Agent** | 15 | 15 | **100.0%** `[79.61%, 100.00%]` |
 | **Deterministic Fallback Router** | 15 | 15 | **100.0%** `[79.61%, 100.00%]` |
-| **Adversarial & Guardrail Checks** | 4 | 4 | **100.0%** `[51.01%, 100.00%]` |
+| **Adversarial & Guardrail Checks** | 2 | 2 | **100.0%** `[34.24%, 100.00%]` |
 
 *Category Differences: None. Both the LLM Agent and the Fallback Router achieved identical 100% pass rates across all held-out categories.*
 
