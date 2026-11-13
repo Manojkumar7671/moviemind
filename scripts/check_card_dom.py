@@ -256,7 +256,11 @@ const elements = {
 
 global.localStorage = { getItem: () => null, setItem: () => {} };
 global.document = {
-  getElementById: (id) => elements[id] || new MockElement('div'),
+  getElementById: (id) => {
+    if (elements[id]) return elements[id];
+    if (id.startsWith('card-')) return null;
+    return new MockElement('div');
+  },
   createElement: (tag) => {
     const el = new MockElement(tag);
     el.parentNode = elements.movieGrid; // default parent
@@ -307,8 +311,8 @@ async function runTest() {
 
   for (let i = 0; i < 10; i++) {
     const toDismiss = state.movies[0].movie_id;
-    dismissMovie(toDismiss);
-    await new Promise(r => setTimeout(r, 10));
+    await dismissMovie(toDismiss);
+    await new Promise(r => setTimeout(r, 20));
   }
 
   const discCount = state.movies.length;
@@ -326,8 +330,8 @@ async function runTest() {
 
   for (let i = 0; i < 10; i++) {
     const toDismiss = state.worldMovies[0].movie_id;
-    dismissMovie(toDismiss);
-    await new Promise(r => setTimeout(r, 10));
+    await dismissMovie(toDismiss);
+    await new Promise(r => setTimeout(r, 20));
   }
 
   const worldCount = state.worldMovies.length;
