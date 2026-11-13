@@ -7,6 +7,11 @@ const state = {
   userId: 'demo_user',
   theme: localStorage.getItem('moviemind-theme') || 'dark',
   movies: [],
+  worldMovies: [],
+  candidateBufferDiscover: [],
+  candidateBufferWorld: [],
+  isRefillingDiscover: false,
+  isRefillingWorld: false,
   tasteMap: null,
   userPoint: { x: 0, y: 0, targetX: 0, targetY: 0 },
   likedSet: new Set(),
@@ -204,7 +209,7 @@ let worldPostersPromise = null;
 async function loadWorldPosters() {
   if (window.WORLD_POSTERS) return window.WORLD_POSTERS;
   if (!worldPostersPromise) {
-    worldPostersPromise = fetch('/static/world_posters.json?v=8')
+    worldPostersPromise = fetch('/static/world_posters.json?v=9')
       .then(res => (res.ok ? res.json() : {}))
       .then(data => {
         window.WORLD_POSTERS = data || {};
@@ -228,6 +233,7 @@ function switchTab(tabName) {
   });
 
   if (tabName === 'tastemap') {
+    loadTasteMap();
     setTimeout(renderTasteMap, 50);
   } else if (tabName === 'world') {
     if (!state.worldLoaded) {
@@ -328,6 +334,8 @@ async function saveGenres() {
       document.getElementById('summaryGenresList').innerText = genresList.join(', ');
     }
     state.movies = data.recommendations || [];
+    state.candidateBufferDiscover = [];
+    refillCandidateBuffer(false);
     updateFallbackNotice(data.llm_fallback, data.notice);
     renderMovieGrid(state.movies, data.trace, data.latency_ms, data.llm_fallback);
     await loadTasteMap();
@@ -386,14 +394,16 @@ async function loadRecommendations() {
     const res = await fetch('/api/recommend', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: state.userId, genres: Array.from(state.selectedGenres), n: 6 })
+      body: JSON.stringify({ user_id: state.userId, genres: Array.from(state.selectedGenres), n: 30 })
     });
     if (!res.ok) {
       showGridError('movieGrid', 'loadRecommendations');
       return;
     }
     const data = await res.json();
-    state.movies = data.recommendations || [];
+    const all = data.recommendations || [];
+    state.movies = all.slice(0, 6);
+    state.candidateBufferDiscover = all.slice(6);
     updateFallbackNotice(data.llm_fallback, data.notice);
     renderMovieGrid(state.movies, data.trace, data.latency_ms, data.llm_fallback);
   } catch (err) {
@@ -505,8 +515,8 @@ function createMovieCardElement(movie, index = 0, isFallback = false, latency = 
         <div class="ticket-actions-row">
           <button class="btn-ticket" onclick="toggleWhy('${movie.movie_id}')">Why this?</button>
           <div style="display:flex; gap:6px;">
-            <button class="btn-ticket btn-like" onclick="likeMovie('${movie.movie_id}')">Like</button>
-            <button class="btn-ticket btn-not-for-me" onclick="dismissMovie('${movie.movie_id}')">Not for me</button>
+            <button class="btn-ticket btn-like" onclick="likeMovie('${movie.movie_id}', ${isWorldCinema})">Like</button>
+            <button class="btn-ticket btn-not-for-me" onclick="dismissMovie('${movie.movie_id}', ${isWorldCinema})">Not for me</button>
           </div>
         </div>
         <div class="why-drawer" id="why-${movie.movie_id}">
@@ -616,7 +626,7 @@ async function loadWorldRecommendations() {
 
   const params = new URLSearchParams({
     user_id: state.userId,
-    n: 12,
+    n: 40,
   });
   if (reg) params.set('region', reg);
   if (lang) params.set('language', lang);
@@ -636,7 +646,9 @@ async function loadWorldRecommendations() {
       return;
     }
     const data = await res.json();
-    state.worldMovies = data.recommendations || [];
+    const all = data.recommendations || [];
+    state.worldMovies = all.slice(0, 12);
+    state.candidateBufferWorld = all.slice(12);
     renderMovieGrid(state.worldMovies, [], { total: data.total_ms }, false, 'worldMovieGrid');
   } catch (err) {
     console.error("Failed to load world recommendations:", err);
@@ -690,150 +702,208 @@ function toggleTrace(id) {
   }
 }
 
-// User Actions: Like / Not for me (optimistic < 5ms UI feedback, background sync)
-let isReplenishingDiscover = false;
-let isReplenishingWorld = false;
-let queuedReplenishDiscover = false;
-let queuedReplenishWorld = false;
+// User Actions: Like / Not for me (optimistic instant UI feedback, pre-buffered backfill)
+function popNextCandidateFromBuffer(isWorld) {
+  const bufferKey = isWorld ? 'candidateBufferWorld' : 'candidateBufferDiscover';
+  const listKey = isWorld ? 'worldMovies' : 'movies';
+  if (!state[bufferKey]) state[bufferKey] = [];
+  const currentList = state[listKey] || [];
+  const existingIds = new Set(currentList.map(m => String(m.movie_id)));
+  const dismissed = state.dismissedSet || new Set();
+  const liked = state.likedSet || new Set();
 
-async function replenishGridCard(isWorld) {
-  if (isWorld) {
-    if (isReplenishingWorld) {
-      queuedReplenishWorld = true;
-      return;
+  while (state[bufferKey].length > 0) {
+    const cand = state[bufferKey].shift();
+    const cid = String(cand.movie_id);
+    if (!existingIds.has(cid) && !dismissed.has(cid) && !liked.has(cid) && !document.getElementById(`card-${cid}`)) {
+      if (state[bufferKey].length < 10) {
+        refillCandidateBuffer(isWorld);
+      }
+      return cand;
     }
-    isReplenishingWorld = true;
-  } else {
-    if (isReplenishingDiscover) {
-      queuedReplenishDiscover = true;
-      return;
-    }
-    isReplenishingDiscover = true;
   }
+  return null;
+}
+
+async function refillCandidateBuffer(isWorld) {
+  const lockKey = isWorld ? 'isRefillingWorld' : 'isRefillingDiscover';
+  if (state[lockKey]) return;
+  state[lockKey] = true;
 
   try {
-    const targetGridId = isWorld ? 'worldMovieGrid' : 'movieGrid';
-    const grid = document.getElementById(targetGridId);
-    if (!grid) return;
-    const targetCount = isWorld ? 12 : 6;
+    const bufferKey = isWorld ? 'candidateBufferWorld' : 'candidateBufferDiscover';
     const listKey = isWorld ? 'worldMovies' : 'movies';
-    if (!state[listKey]) state[listKey] = [];
+    const currentList = state[listKey] || [];
+    const existingIds = new Set(currentList.map(m => String(m.movie_id)));
+    (state[bufferKey] || []).forEach(m => existingIds.add(String(m.movie_id)));
+    const dismissed = state.dismissedSet || new Set();
+    const liked = state.likedSet || new Set();
 
-    let attempts = 0;
-    while (state[listKey].length < targetCount && attempts < 3) {
-      attempts++;
-      let candidates = [];
-
-      if (isWorld) {
-        const f = state.worldFilters || {};
-        const params = new URLSearchParams({
-          user_id: state.userId,
-          n: Math.min(targetCount + 20, 50)
-        });
-        if (f.region) params.set('region', f.region);
-        if (f.language) params.set('language', f.language);
-        if (f.genre) params.set('genre', f.genre);
-        if (f.year_min) params.set('year_min', f.year_min);
-        if (f.year_max) params.set('year_max', f.year_max);
-        const res = await fetch(`/api/global/recommend?${params.toString()}`);
-        if (res.ok) {
-          const data = await res.json();
-          candidates = data.recommendations || [];
-        }
-      } else {
-        const res = await fetch('/api/recommend', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: state.userId,
-            genres: Array.from(state.selectedGenres),
-            n: Math.min(targetCount + 20, 50)
-          })
-        });
-        if (res.ok) {
-          const data = await res.json();
-          candidates = data.recommendations || [];
-        }
-      }
-
-      const existingIds = new Set(state[listKey].map(m => String(m.movie_id)));
-      const dismissed = state.dismissedSet || new Set();
-      const liked = state.likedSet || new Set();
-
-      let addedAny = false;
-      for (const cand of candidates) {
-        const cid = String(cand.movie_id);
-        if (!existingIds.has(cid) && !dismissed.has(cid) && !liked.has(cid) && !document.getElementById(`card-${cid}`)) {
-          state[listKey].push(cand);
-          existingIds.add(cid);
-          grid.appendChild(createMovieCardElement(cand, state[listKey].length - 1, false, {}, [], targetGridId));
-          addedAny = true;
-          if (state[listKey].length >= targetCount) break;
-        }
-      }
-
-      if (!addedAny) break;
-    }
-  } catch (err) {
-    console.warn("Background replenish failed:", err);
-  } finally {
+    let candidates = [];
     if (isWorld) {
-      isReplenishingWorld = false;
-      if (queuedReplenishWorld) {
-        queuedReplenishWorld = false;
-        replenishGridCard(true);
+      const f = state.worldFilters || {};
+      const params = new URLSearchParams({
+        user_id: state.userId,
+        n: 40
+      });
+      if (f.region) params.set('region', f.region);
+      if (f.language) params.set('language', f.language);
+      if (f.genre) params.set('genre', f.genre);
+      if (f.year_min) params.set('year_min', f.year_min);
+      if (f.year_max) params.set('year_max', f.year_max);
+      const res = await fetch(`/api/global/recommend?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        candidates = data.recommendations || [];
       }
     } else {
-      isReplenishingDiscover = false;
-      if (queuedReplenishDiscover) {
-        queuedReplenishDiscover = false;
-        replenishGridCard(false);
+      const res = await fetch('/api/recommend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: state.userId,
+          genres: Array.from(state.selectedGenres),
+          n: 40
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        candidates = data.recommendations || [];
       }
     }
+
+    if (!state[bufferKey]) state[bufferKey] = [];
+    for (const c of candidates) {
+      const cid = String(c.movie_id);
+      if (!existingIds.has(cid) && !dismissed.has(cid) && !liked.has(cid) && !document.getElementById(`card-${cid}`)) {
+        state[bufferKey].push(c);
+        existingIds.add(cid);
+      }
+    }
+  } catch (err) {
+    console.warn("Buffer refill failed:", err);
+  } finally {
+    state[lockKey] = false;
   }
 }
 
-let tasteMapDebounceTimer = null;
-function scheduleTasteMapUpdate() {
-  clearTimeout(tasteMapDebounceTimer);
-  tasteMapDebounceTimer = setTimeout(loadTasteMap, 600);
+async function getNextCandidate(isWorld) {
+  let cand = popNextCandidateFromBuffer(isWorld);
+  if (cand) return cand;
+
+  await refillCandidateBuffer(isWorld);
+  return popNextCandidateFromBuffer(isWorld);
 }
 
-function sendFeedbackInBackground(movieId, feedbackType, onDone) {
+async function replenishGridCard(isWorld) {
+  const targetGridId = isWorld ? 'worldMovieGrid' : 'movieGrid';
+  const grid = document.getElementById(targetGridId);
+  if (!grid) return;
+  const targetCount = isWorld ? 12 : 6;
+  const listKey = isWorld ? 'worldMovies' : 'movies';
+  if (!state[listKey]) state[listKey] = [];
+
+  while (state[listKey].length < targetCount) {
+    const cand = await getNextCandidate(isWorld);
+    if (!cand) break;
+    state[listKey].push(cand);
+    grid.appendChild(createMovieCardElement(cand, state[listKey].length - 1, false, {}, [], targetGridId));
+  }
+}
+
+function sendFeedbackInBackground(movieId, feedbackType) {
   fetch('/api/feedback', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ user_id: state.userId, movie_id: movieId, feedback_type: feedbackType })
-  })
-    .then(() => {
-      if (onDone) onDone();
-      scheduleTasteMapUpdate();
-    })
-    .catch(err => {
-      console.warn("Feedback sync failed:", err);
-      if (onDone) onDone();
-    });
+  }).catch(err => {
+    console.warn("Feedback sync failed:", err);
+  });
 }
 
-function replaceMovieCard(movieId, isWorld) {
-  const card = document.getElementById(`card-${movieId}`);
+async function replaceMovieCard(movieId, isWorld) {
+  if (typeof isWorld !== 'boolean') {
+    isWorld = state.activeTab === 'world';
+  }
+  const targetGridId = isWorld ? 'worldMovieGrid' : 'movieGrid';
+  const grid = document.getElementById(targetGridId);
   const listKey = isWorld ? 'worldMovies' : 'movies';
+  const targetCount = isWorld ? 12 : 6;
   if (!state[listKey]) state[listKey] = [];
-  state[listKey] = state[listKey].filter(m => String(m.movie_id) !== String(movieId));
 
-  if (card) {
-    card.remove();
+  const card = document.getElementById(`card-${movieId}`);
+  const cardIndex = state[listKey].findIndex(m => String(m.movie_id) === String(movieId));
+
+  let nextCand = popNextCandidateFromBuffer(isWorld);
+  if (!nextCand) {
+    nextCand = await getNextCandidate(isWorld);
   }
 
-  return replenishGridCard(isWorld);
+  if (nextCand) {
+    if (cardIndex !== -1) {
+      state[listKey][cardIndex] = nextCand;
+    } else {
+      state[listKey] = state[listKey].filter(m => String(m.movie_id) !== String(movieId));
+      state[listKey].push(nextCand);
+    }
+
+    const newCard = createMovieCardElement(
+      nextCand,
+      cardIndex !== -1 ? cardIndex : state[listKey].length - 1,
+      false,
+      {},
+      [],
+      targetGridId
+    );
+
+    if (card && card.parentNode && typeof card.replaceWith === 'function') {
+      card.replaceWith(newCard);
+    } else if (card && card.parentNode) {
+      const parent = card.parentNode;
+      const idx = parent.children ? parent.children.indexOf(card) : -1;
+      card.remove();
+      if (idx !== -1 && parent.children) {
+        parent.children.splice(idx, 0, newCard);
+        newCard.parentNode = parent;
+      } else {
+        parent.appendChild(newCard);
+      }
+    } else if (grid) {
+      if (card) card.remove();
+      grid.appendChild(newCard);
+    }
+  } else {
+    if (card) card.remove();
+    state[listKey] = state[listKey].filter(m => String(m.movie_id) !== String(movieId));
+    if (isWorld) {
+      await loadWorldRecommendations();
+    } else {
+      await loadRecommendations();
+    }
+  }
+
+  if (grid && grid.querySelectorAll) {
+    const currentCards = grid.querySelectorAll('.movie-card');
+    while (currentCards.length < targetCount && state[isWorld ? 'candidateBufferWorld' : 'candidateBufferDiscover']?.length > 0) {
+      const extra = popNextCandidateFromBuffer(isWorld);
+      if (extra) {
+        state[listKey].push(extra);
+        grid.appendChild(createMovieCardElement(extra, state[listKey].length - 1, false, {}, [], targetGridId));
+      } else {
+        break;
+      }
+    }
+  }
 }
 
-function likeMovie(movieId) {
-  const isWorld = state.activeTab === 'world';
+function likeMovie(movieId, isWorld) {
+  if (typeof isWorld !== 'boolean') {
+    isWorld = state.activeTab === 'world';
+  }
   if (!state.likedSet) state.likedSet = new Set();
   state.likedSet.add(String(movieId));
   const card = document.getElementById(`card-${movieId}`);
-  const likeBtn = card?.querySelector('.btn-like');
+  const likeBtn = card?.querySelector?.('.btn-like');
   if (likeBtn) {
     likeBtn.classList.add('liked');
     likeBtn.textContent = 'Liked ✓';
@@ -845,8 +915,10 @@ function likeMovie(movieId) {
   return p;
 }
 
-function dismissMovie(movieId) {
-  const isWorld = state.activeTab === 'world';
+function dismissMovie(movieId, isWorld) {
+  if (typeof isWorld !== 'boolean') {
+    isWorld = state.activeTab === 'world';
+  }
   const listKey = isWorld ? 'worldMovies' : 'movies';
   const list = state[listKey] || [];
   const movieObj = list.find(m => String(m.movie_id) === String(movieId));

@@ -241,6 +241,15 @@ class MockElement {
   querySelector() {
     return new MockElement('button');
   }
+  replaceWith(newEl) {
+    if (this.parentNode) {
+      const idx = this.parentNode.children.indexOf(this);
+      if (idx !== -1) {
+        this.parentNode.children.splice(idx, 1, newEl);
+        newEl.parentNode = this.parentNode;
+      }
+    }
+  }
   remove() {
     if (this.parentNode) {
       const idx = this.parentNode.children.indexOf(this);
@@ -258,7 +267,10 @@ global.localStorage = { getItem: () => null, setItem: () => {} };
 global.document = {
   getElementById: (id) => {
     if (elements[id]) return elements[id];
-    if (id.startsWith('card-')) return null;
+    if (id.startsWith('card-')) {
+      const foundInGrid = elements.movieGrid.children.find(c => c.id === id) || elements.worldMovieGrid.children.find(c => c.id === id);
+      return foundInGrid || null;
+    }
     return new MockElement('div');
   },
   createElement: (tag) => {
@@ -316,6 +328,7 @@ async function runTest() {
   }
 
   const discCount = state.movies.length;
+  const discDomCount = elements.movieGrid.children.length;
   const discIds = state.movies.map(m => String(m.movie_id));
   const discUnique = new Set(discIds).size === discCount;
 
@@ -335,13 +348,16 @@ async function runTest() {
   }
 
   const worldCount = state.worldMovies.length;
+  const worldDomCount = elements.worldMovieGrid.children.length;
   const worldIds = state.worldMovies.map(m => String(m.movie_id));
   const worldUnique = new Set(worldIds).size === worldCount;
 
   console.log(JSON.stringify({
     discoverCount: discCount,
+    discoverDomCount: discDomCount,
     discoverUnique: discUnique,
     worldCount: worldCount,
+    worldDomCount: worldDomCount,
     worldUnique: worldUnique
   }));
 }
@@ -361,17 +377,23 @@ runTest();
 
     data = json.loads(res.stdout)
     disc_count = data["discoverCount"]
+    disc_dom_count = data["discoverDomCount"]
     disc_uniq = data["discoverUnique"]
     world_count = data["worldCount"]
+    world_dom_count = data["worldDomCount"]
     world_uniq = data["worldUnique"]
 
     errors = []
     if disc_count != 6:
         errors.append(f"Discover card count changed to {disc_count} (expected 6) after 10 dismissals!")
+    if disc_dom_count != 6:
+        errors.append(f"Discover DOM element count changed to {disc_dom_count} (expected 6) after 10 dismissals!")
     if not disc_uniq:
         errors.append("Duplicate movie IDs detected on Discover after consecutive dismissals!")
     if world_count != 12:
         errors.append(f"World card count changed to {world_count} (expected 12) after 10 dismissals!")
+    if world_dom_count != 12:
+        errors.append(f"World DOM element count changed to {world_dom_count} (expected 12) after 10 dismissals!")
     if not world_uniq:
         errors.append("Duplicate movie IDs detected on World cinema after consecutive dismissals!")
 
