@@ -229,6 +229,7 @@ class GlobalContentRecommender:
     def recommend(
         self,
         liked_ids: Optional[List[str]] = None,
+        disliked_ids: Optional[List[str]] = None,
         genres: Optional[List[str]] = None,
         region: Optional[str] = None,
         language: Optional[str] = None,
@@ -269,6 +270,10 @@ class GlobalContentRecommender:
         if liked_ids:
             liked_set = set(liked_ids)
             mask &= ~self.df["id"].isin(liked_set)
+
+        if disliked_ids:
+            disliked_set = set(disliked_ids)
+            mask &= ~self.df["id"].isin(disliked_set)
 
         cand_indices = np.where(mask)[0]
         if len(cand_indices) == 0:

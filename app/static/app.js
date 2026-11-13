@@ -204,7 +204,7 @@ let worldPostersPromise = null;
 async function loadWorldPosters() {
   if (window.WORLD_POSTERS) return window.WORLD_POSTERS;
   if (!worldPostersPromise) {
-    worldPostersPromise = fetch('/static/world_posters.json?v=6')
+    worldPostersPromise = fetch('/static/world_posters.json?v=7')
       .then(res => (res.ok ? res.json() : {}))
       .then(data => {
         window.WORLD_POSTERS = data || {};
@@ -327,8 +327,9 @@ async function saveGenres() {
       summaryBar.style.display = 'flex';
       document.getElementById('summaryGenresList').innerText = genresList.join(', ');
     }
+    state.movies = data.recommendations || [];
     updateFallbackNotice(data.llm_fallback, data.notice);
-    renderMovieGrid(data.recommendations, data.trace, data.latency_ms, data.llm_fallback);
+    renderMovieGrid(state.movies, data.trace, data.latency_ms, data.llm_fallback);
     await loadTasteMap();
   } catch (err) {
     showToast("Failed to save genres: " + err);
@@ -695,47 +696,66 @@ async function replenishGridCard(isWorld) {
   const grid = document.getElementById(targetGridId);
   if (!grid) return;
   const targetCount = isWorld ? 12 : 6;
-  const currentList = isWorld ? (state.worldMovies || []) : (state.movies || []);
+  const listKey = isWorld ? 'worldMovies' : 'movies';
+  if (!state[listKey]) state[listKey] = [];
+  const currentList = state[listKey];
+
   if (currentList.length >= targetCount) return;
 
   try {
     let candidates = [];
     if (isWorld) {
       const f = state.worldFilters || {};
-      const params = new URLSearchParams({ user_id: state.userId, n: targetCount + 4 });
+      const params = new URLSearchParams({ user_id: state.userId, n: targetCount + 10 });
       if (f.region) params.set('region', f.region);
       if (f.language) params.set('language', f.language);
       if (f.genre) params.set('genre', f.genre);
       if (f.year_min) params.set('year_min', f.year_min);
       if (f.year_max) params.set('year_max', f.year_max);
       const res = await fetch(`/api/global/recommend?${params.toString()}`);
-      if (!res.ok) return;
+      if (!res.ok) throw new Error("World recommend HTTP " + res.status);
       const data = await res.json();
       candidates = data.recommendations || [];
     } else {
       const res = await fetch('/api/recommend', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: state.userId, genres: Array.from(state.selectedGenres), n: targetCount + 4 })
+        body: JSON.stringify({ user_id: state.userId, genres: Array.from(state.selectedGenres), n: targetCount + 10 })
       });
-      if (!res.ok) return;
+      if (!res.ok) throw new Error("Recommend HTTP " + res.status);
       const data = await res.json();
       candidates = data.recommendations || [];
     }
 
     const existingIds = new Set(currentList.map(m => String(m.movie_id)));
     const dismissed = state.dismissedSet || new Set();
+    const liked = state.likedSet || new Set();
+
     for (const cand of candidates) {
       const cid = String(cand.movie_id);
-      if (!existingIds.has(cid) && !dismissed.has(cid)) {
+      if (!existingIds.has(cid) && !dismissed.has(cid) && !liked.has(cid)) {
         currentList.push(cand);
         existingIds.add(cid);
         grid.appendChild(createMovieCardElement(cand, 0, false, {}, [], targetGridId));
         if (currentList.length >= targetCount) break;
       }
     }
+
+    // Fallback: if candidate filtering yielded no new movie, re-fetch full list
+    if (currentList.length < targetCount) {
+      if (isWorld) {
+        await loadWorldRecommendations();
+      } else {
+        await loadRecommendations();
+      }
+    }
   } catch (err) {
-    console.warn("Background replenish failed:", err);
+    console.warn("Background replenish failed, falling back to full refresh:", err);
+    if (isWorld) {
+      loadWorldRecommendations();
+    } else {
+      loadRecommendations();
+    }
   }
 }
 
@@ -749,11 +769,32 @@ function sendFeedbackInBackground(movieId, feedbackType, onDone) {
       if (onDone) onDone();
       loadTasteMap();
     })
-    .catch(err => console.warn("Feedback sync failed:", err));
+    .catch(err => {
+      console.warn("Feedback sync failed:", err);
+      if (onDone) onDone();
+    });
+}
+
+function replaceMovieCard(movieId, isWorld) {
+  const card = document.getElementById(`card-${movieId}`);
+  const listKey = isWorld ? 'worldMovies' : 'movies';
+  const list = state[listKey] || [];
+  state[listKey] = list.filter(m => String(m.movie_id) !== String(movieId));
+
+  if (card) {
+    card.style.opacity = '0';
+    card.style.transform = 'scale(0.92)';
+    setTimeout(() => {
+      if (card.parentNode) card.remove();
+    }, 140);
+  }
+
+  replenishGridCard(isWorld);
 }
 
 function likeMovie(movieId) {
-  state.likedSet.add(movieId);
+  const isWorld = state.activeTab === 'world';
+  state.likedSet.add(String(movieId));
   const card = document.getElementById(`card-${movieId}`);
   const likeBtn = card?.querySelector('.btn-like');
   if (likeBtn) {
@@ -762,28 +803,22 @@ function likeMovie(movieId) {
     likeBtn.setAttribute('aria-pressed', 'true');
   }
   showToast("Added to likes!");
+  replaceMovieCard(movieId, isWorld);
   sendFeedbackInBackground(movieId, 'like');
 }
 
 function dismissMovie(movieId) {
   const isWorld = state.activeTab === 'world';
-  const card = document.getElementById(`card-${movieId}`);
   const listKey = isWorld ? 'worldMovies' : 'movies';
   const list = state[listKey] || [];
   const movieObj = list.find(m => String(m.movie_id) === String(movieId));
   state.lastDismissed = movieObj || { movie_id: movieId };
   if (!state.dismissedSet) state.dismissedSet = new Set();
   state.dismissedSet.add(String(movieId));
-  state[listKey] = list.filter(m => String(m.movie_id) !== String(movieId));
-
-  if (card) {
-    card.style.opacity = '0';
-    card.style.transform = 'scale(0.92)';
-    setTimeout(() => card.remove(), 140);
-  }
 
   showToast("Removed from picks", true);
-  sendFeedbackInBackground(movieId, 'dislike', () => replenishGridCard(isWorld));
+  replaceMovieCard(movieId, isWorld);
+  sendFeedbackInBackground(movieId, 'dislike');
 }
 
 async function undoDismiss() {
@@ -1128,7 +1163,8 @@ async function sendChatMessage() {
 
     // If chat returned recommendation cards, update movie grid too
     if (data.cards && data.cards.length > 0) {
-      renderMovieGrid(data.cards, data.trace, data.latency_ms);
+      state.movies = data.cards;
+      renderMovieGrid(state.movies, data.trace, data.latency_ms);
       showToast("Updated recommendations based on your chat request!");
     }
   } catch (err) {

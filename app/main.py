@@ -218,10 +218,12 @@ def get_global_recommend(
         raise HTTPException(status_code=400, detail="Cannot select more than 5 genres")
     fb = agent.memory.get_feedback(user_id)
     liked_ids = [str(m) for m in fb["liked"]]
+    disliked_ids = [str(m) for m in fb.get("disliked", [])]
     genres = [g.strip() for g in genre.split(",") if g.strip()] if genre else None
     t0 = time.perf_counter()
     recs = gr.recommend(
         liked_ids=liked_ids,
+        disliked_ids=disliked_ids,
         genres=genres,
         region=region if region and region != "all" else None,
         language=language if language and language != "all" else None,

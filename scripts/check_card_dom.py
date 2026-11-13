@@ -35,6 +35,12 @@ class MockElement {
     this.children = [];
     this.style = {};
     this.className = '';
+    this.classList = {
+      add: () => {},
+      remove: () => {},
+      contains: () => false,
+      toggle: () => {},
+    };
     this.id = '';
   }
   appendChild(child) {
@@ -56,7 +62,8 @@ global.document = {
 global.window = { addEventListener: () => {} };
 
 const code = fs.readFileSync(process.argv[1], 'utf8');
-eval(code);
+eval(code + '; global.state = state; global.dismissMovie = dismissMovie; global.likeMovie = likeMovie; global.replenishGridCard = replenishGridCard; global.renderMovieGrid = renderMovieGrid; global.createMovieCardElement = createMovieCardElement;');
+
 
 // 1. Render Discover card
 renderMovieGrid([{
@@ -208,7 +215,175 @@ def check_viewports() -> bool:
     return True
 
 
+def check_consecutive_replenish() -> bool:
+    print("=== Consecutive 'Not for me' Replenish Test (10 clicks) ===")
+    node_replenish_script = """
+const fs = require('fs');
+
+class MockElement {
+  constructor(tagName = 'div') {
+    this.tagName = tagName;
+    this.innerHTML = '';
+    this.children = [];
+    this.style = {};
+    this.className = '';
+    this.classList = {
+      add: () => {},
+      remove: () => {},
+      contains: () => false,
+      toggle: () => {},
+    };
+    this.id = '';
+  }
+  appendChild(child) {
+    this.children.push(child);
+  }
+  querySelector() {
+    return new MockElement('button');
+  }
+  remove() {
+    if (this.parentNode) {
+      const idx = this.parentNode.children.indexOf(this);
+      if (idx !== -1) this.parentNode.children.splice(idx, 1);
+    }
+  }
+}
+
+const elements = {
+  movieGrid: new MockElement('div'),
+  worldMovieGrid: new MockElement('div'),
+};
+
+global.localStorage = { getItem: () => null, setItem: () => {} };
+global.document = {
+  getElementById: (id) => elements[id] || new MockElement('div'),
+  createElement: (tag) => {
+    const el = new MockElement(tag);
+    el.parentNode = elements.movieGrid; // default parent
+    return el;
+  },
+  addEventListener: () => {},
+};
+global.window = { addEventListener: () => {} };
+
+// Mock global fetch
+let nextId = 100;
+global.fetch = async (url) => {
+  return {
+    ok: true,
+    json: async () => {
+      const recs = [];
+      for (let i = 0; i < 20; i++) {
+        recs.push({
+          movie_id: ++nextId,
+          title: `Replenish Movie ${nextId}`,
+          year: 2000,
+          genres: ['Action'],
+          match_pct: 90
+        });
+      }
+      return { recommendations: recs };
+    }
+  };
+};
+
+const code = fs.readFileSync(process.argv[1], 'utf8');
+eval(code + '; global.state = state; global.dismissMovie = dismissMovie; global.likeMovie = likeMovie; global.replenishGridCard = replenishGridCard; global.renderMovieGrid = renderMovieGrid; global.createMovieCardElement = createMovieCardElement;');
+
+
+async function runTest() {
+  // 1. Discover tab test: initial 6 cards
+  state.activeTab = 'discover';
+  state.movies = [
+    { movie_id: 1, title: 'M1', year: 1995, genres: ['Action'] },
+    { movie_id: 2, title: 'M2', year: 1995, genres: ['Action'] },
+    { movie_id: 3, title: 'M3', year: 1995, genres: ['Action'] },
+    { movie_id: 4, title: 'M4', year: 1995, genres: ['Action'] },
+    { movie_id: 5, title: 'M5', year: 1995, genres: ['Action'] },
+    { movie_id: 6, title: 'M6', year: 1995, genres: ['Action'] },
+  ];
+  renderMovieGrid(state.movies, [], {}, false, 'movieGrid');
+  elements.movieGrid.children.forEach(c => c.parentNode = elements.movieGrid);
+
+  for (let i = 0; i < 10; i++) {
+    const toDismiss = state.movies[0].movie_id;
+    dismissMovie(toDismiss);
+    await new Promise(r => setTimeout(r, 10));
+  }
+
+  const discCount = state.movies.length;
+  const discIds = state.movies.map(m => String(m.movie_id));
+  const discUnique = new Set(discIds).size === discCount;
+
+  // 2. World tab test: initial 12 cards
+  state.activeTab = 'world';
+  state.worldMovies = [];
+  for (let i = 1; i <= 12; i++) {
+    state.worldMovies.push({ movie_id: 'tt' + i, title: 'W' + i, year: 2010, genres: ['Drama'] });
+  }
+  renderMovieGrid(state.worldMovies, [], {}, false, 'worldMovieGrid');
+  elements.worldMovieGrid.children.forEach(c => c.parentNode = elements.worldMovieGrid);
+
+  for (let i = 0; i < 10; i++) {
+    const toDismiss = state.worldMovies[0].movie_id;
+    dismissMovie(toDismiss);
+    await new Promise(r => setTimeout(r, 10));
+  }
+
+  const worldCount = state.worldMovies.length;
+  const worldIds = state.worldMovies.map(m => String(m.movie_id));
+  const worldUnique = new Set(worldIds).size === worldCount;
+
+  console.log(JSON.stringify({
+    discoverCount: discCount,
+    discoverUnique: discUnique,
+    worldCount: worldCount,
+    worldUnique: worldUnique
+  }));
+}
+
+runTest();
+"""
+
+    res = subprocess.run(
+        ["node", "-e", node_replenish_script, str(APP_JS)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if res.returncode != 0:
+        print(f"FAILED: Node execution error in replenish test: {res.stderr}")
+        return False
+
+    data = json.loads(res.stdout)
+    disc_count = data["discoverCount"]
+    disc_uniq = data["discoverUnique"]
+    world_count = data["worldCount"]
+    world_uniq = data["worldUnique"]
+
+    errors = []
+    if disc_count != 6:
+        errors.append(f"Discover card count changed to {disc_count} (expected 6) after 10 dismissals!")
+    if not disc_uniq:
+        errors.append("Duplicate movie IDs detected on Discover after consecutive dismissals!")
+    if world_count != 12:
+        errors.append(f"World card count changed to {world_count} (expected 12) after 10 dismissals!")
+    if not world_uniq:
+        errors.append("Duplicate movie IDs detected on World cinema after consecutive dismissals!")
+
+    if errors:
+        for err in errors:
+            print(f"  ❌ {err}")
+        return False
+
+    print("  ✅ Discover: 10 consecutive 'Not for me' clicks maintained exactly 6 cards with 0 duplicates.")
+    print("  ✅ World Cinema: 10 consecutive 'Not for me' clicks maintained exactly 12 cards with 0 duplicates.")
+    print("\nAll Replenish checks PASSED!\n")
+    return True
+
+
 if __name__ == "__main__":
     dom_ok = run_dom_check()
     vp_ok = check_viewports()
-    sys.exit(0 if (dom_ok and vp_ok) else 1)
+    replenish_ok = check_consecutive_replenish()
+    sys.exit(0 if (dom_ok and vp_ok and replenish_ok) else 1)
