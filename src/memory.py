@@ -10,13 +10,18 @@ DB_PATH = DATA_DIR / "memory.db"
 
 class UserMemory:
     """SQLite store of per-user liked/disliked movies and taste summaries."""
-    def __init__(self, db_path: Path = DB_PATH):
+    _cached_meta: Optional[Dict[str, dict]] = None
+
+    def __init__(self, db_path: Path = DB_PATH, meta_provider: Optional[Dict] = None):
         self.db_path = db_path
+        self._meta_provider = meta_provider
         self.init_db()
 
     def get_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
+        conn = sqlite3.connect(str(self.db_path), timeout=10.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout=5000;")
         return conn
 
     def init_db(self):
@@ -103,21 +108,38 @@ class UserMemory:
             conn.commit()
 
     def refresh_taste_summary(self, user_id: str, movies_df: Optional[pd.DataFrame] = None) -> str:
-        """Derives taste profile based on liked/disliked movie genres."""
+        """Derives taste profile based on liked/disliked movie genres without full catalog rescans."""
         fb = self.get_feedback(user_id)
         if not fb["liked"] and not fb["disliked"]:
             return self.get_taste_summary(user_id)
 
-        if movies_df is None:
-            movies_df = pd.read_parquet(DATA_DIR / "movies.parquet")
-        meta = movies_df.set_index("movie_id").to_dict(orient="index")
-        global_path = Path(__file__).resolve().parent.parent / "artifacts" / "global_catalog.parquet"
-        if global_path.exists():
-            gdf = pd.read_parquet(global_path)
-            for _, grow in gdf.iterrows():
-                gid = str(grow["id"])
-                if gid not in meta:
-                    meta[gid] = {"title": grow["title"], "genres": grow["genres"]}
+        meta = self._meta_provider
+        if meta is None:
+            if UserMemory._cached_meta is None:
+                UserMemory._cached_meta = {}
+                m_path = DATA_DIR / "movies.parquet"
+                if m_path.exists():
+                    m_df = pd.read_parquet(m_path, columns=["movie_id", "title", "genres"])
+                    for _, r in m_df.iterrows():
+                        UserMemory._cached_meta[r["movie_id"]] = {"title": r["title"], "genres": r["genres"]}
+                        UserMemory._cached_meta[str(r["movie_id"])] = {"title": r["title"], "genres": r["genres"]}
+            meta = UserMemory._cached_meta
+
+        # Only look up missing IDs for this specific user's feedback
+        needed_ids = [str(m) for m in fb["liked"] + fb["disliked"] if m not in meta and str(m) not in meta]
+        if needed_ids:
+            global_path = Path(__file__).resolve().parent.parent / "artifacts" / "global_catalog.parquet"
+            if global_path.exists():
+                try:
+                    import pyarrow.dataset as ds
+                    dataset = ds.dataset(global_path, format="parquet")
+                    filt = ds.field("id").isin(needed_ids)
+                    sub_table = dataset.to_table(filter=filt, columns=["id", "title", "genres"])
+                    for r in sub_table.to_pylist():
+                        gid = str(r["id"])
+                        meta[gid] = {"title": r["title"], "genres": r["genres"]}
+                except Exception:
+                    pass
 
         liked_titles = [clean_title(meta[m]["title"]) for m in fb["liked"] if m in meta]
         disliked_titles = [clean_title(meta[m]["title"]) for m in fb["disliked"] if m in meta]
@@ -126,7 +148,8 @@ class UserMemory:
         for m in fb["liked"]:
             if m in meta:
                 for g in str(meta[m]["genres"]).split("|"):
-                    liked_genres[g] = liked_genres.get(g, 0) + 1
+                    if g.strip():
+                        liked_genres[g.strip()] = liked_genres.get(g.strip(), 0) + 1
 
         top_genres = sorted(liked_genres.items(), key=lambda x: x[1], reverse=True)[:3]
         top_genre_str = ", ".join([g for g, _ in top_genres]) if top_genres else "General"

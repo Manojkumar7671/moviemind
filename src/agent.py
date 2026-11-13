@@ -228,7 +228,7 @@ class MovieMindAgent:
         }.items():
             self.title_map[a] = mid
 
-        self.memory = UserMemory()
+        self.memory = UserMemory(meta_provider=dict(self.movie_meta))
         self.coldstart = ColdStartRecommender(data_dir, artifacts_dir)
 
         # Preloaded candidate tables: compact 2D MMRCache (1.15 MB instead of 33 MB)
@@ -1743,6 +1743,9 @@ class MovieMindAgent:
         if meta is None:
             return {"error": f"Movie '{title or movie_id}' does not exist in catalog."}
         title_str = clean_title(meta["title"])
+        if hasattr(self.memory, "_meta_provider") and self.memory._meta_provider is not None:
+            self.memory._meta_provider[str(movie_id)] = {"title": meta["title"], "genres": meta.get("genres", "")}
+            self.memory._meta_provider[movie_id] = {"title": meta["title"], "genres": meta.get("genres", "")}
         is_new, status_msg = self.memory.record_feedback(user_id, movie_id, feedback_type)
         if not is_new and "already" in status_msg:
             return {"status": "noop", "message": f"'{title_str}' is already {feedback_type}d."}

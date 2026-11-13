@@ -209,7 +209,7 @@ let worldPostersPromise = null;
 async function loadWorldPosters() {
   if (window.WORLD_POSTERS) return window.WORLD_POSTERS;
   if (!worldPostersPromise) {
-    worldPostersPromise = fetch('/static/world_posters.json?v=10')
+    worldPostersPromise = fetch('/static/world_posters.json?v=11')
       .then(res => (res.ok ? res.json() : {}))
       .then(data => {
         window.WORLD_POSTERS = data || {};
@@ -811,14 +811,31 @@ async function replenishGridCard(isWorld) {
   }
 }
 
+const feedbackQueue = [];
+let isProcessingFeedback = false;
+
+async function processFeedbackQueue() {
+  if (isProcessingFeedback) return;
+  isProcessingFeedback = true;
+  while (feedbackQueue.length > 0) {
+    const item = feedbackQueue.shift();
+    try {
+      await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: state.userId, movie_id: item.movieId, feedback_type: item.feedbackType })
+      });
+    } catch (err) {
+      console.warn("Feedback sync failed:", err);
+    }
+    await new Promise(r => setTimeout(r, 40));
+  }
+  isProcessingFeedback = false;
+}
+
 function sendFeedbackInBackground(movieId, feedbackType) {
-  fetch('/api/feedback', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user_id: state.userId, movie_id: movieId, feedback_type: feedbackType })
-  }).catch(err => {
-    console.warn("Feedback sync failed:", err);
-  });
+  feedbackQueue.push({ movieId, feedbackType });
+  processFeedbackQueue();
 }
 
 async function replaceMovieCard(movieId, isWorld) {
