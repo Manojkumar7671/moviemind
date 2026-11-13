@@ -298,18 +298,9 @@ class MovieMindAgent:
             self._global_meta = {}
             return
 
-        needed_cols = [
-            "id", "imdb_id", "title", "year", "genres", "rating", "votes",
-            "origin_countries", "origin_country_names", "original_languages", "original_language_names",
-        ]
-        self._global_df = pd.read_parquet(global_path, columns=needed_cols)
-        self._global_df["year"] = self._global_df["year"].astype(np.int16)
-        self._global_df["rating"] = self._global_df["rating"].astype(np.float32)
-        self._global_df["votes"] = self._global_df["votes"].astype(np.int32)
-        self._global_df["origin_countries"] = self._global_df["origin_countries"].apply(intern_tuple)
-        self._global_df["origin_country_names"] = self._global_df["origin_country_names"].apply(intern_tuple)
-        self._global_df["original_languages"] = self._global_df["original_languages"].apply(intern_tuple)
-        self._global_df["original_language_names"] = self._global_df["original_language_names"].apply(intern_tuple)
+        # Share the DataFrame from singleton GlobalContentRecommender to prevent duplicate parquet in memory
+        gr = self.global_recommender
+        self._global_df = gr.df
         self._global_meta = GlobalMetaDict(self._global_df)
         self._global_titles_lower = self._global_df["title"].str.lower()
         self._fuzzy_cache: OrderedDict = OrderedDict()
@@ -419,7 +410,7 @@ class MovieMindAgent:
     def global_recommender(self):
         if self._global_recommender is None:
             from src.global_recommender import GlobalContentRecommender
-            self._global_recommender = GlobalContentRecommender(self.artifacts_dir / "global_catalog.parquet")
+            self._global_recommender = GlobalContentRecommender.get_instance(self.artifacts_dir / "global_catalog.parquet")
         return self._global_recommender
 
     # ================= TOOLS =================

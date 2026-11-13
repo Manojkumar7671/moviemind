@@ -209,7 +209,7 @@ let worldPostersPromise = null;
 async function loadWorldPosters() {
   if (window.WORLD_POSTERS) return window.WORLD_POSTERS;
   if (!worldPostersPromise) {
-    worldPostersPromise = fetch('/static/world_posters.json?v=9')
+    worldPostersPromise = fetch('/static/world_posters.json?v=10')
       .then(res => (res.ok ? res.json() : {}))
       .then(data => {
         window.WORLD_POSTERS = data || {};
@@ -1272,11 +1272,18 @@ async function sendChatMessage() {
 
     appendChatMsg('bot', formatted);
 
-    // If chat returned recommendation cards, update movie grid too
+    // Display cards strictly inside chat drawer; never replace main recommendation grid
     if (data.cards && data.cards.length > 0) {
-      state.movies = data.cards;
-      renderMovieGrid(state.movies, data.trace, data.latency_ms);
-      showToast("Updated recommendations based on your chat request!");
+      const cardsHtml = data.cards.slice(0, 5).map(c => `
+        <div class="chat-card-item" style="margin-top: 6px; padding: 6px 10px; background: rgba(255,255,255,0.05); border-radius: 6px; border: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-weight: 600; font-size: 12px; color: var(--text);">${c.title} <span style="opacity: 0.6; font-size: 11px;">(${c.year})</span></div>
+            <div style="font-size: 11px; color: var(--muted);">${(c.genres || []).slice(0, 2).join(', ')}</div>
+          </div>
+          <span style="font-size: 11px; font-weight: 600; color: var(--primary);">${c.match_pct || 90}% match</span>
+        </div>
+      `).join('');
+      appendChatMsg('bot', `<div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; color: var(--retro);">Matched Films:</div>${cardsHtml}`);
     }
   } catch (err) {
     skeleton.remove();

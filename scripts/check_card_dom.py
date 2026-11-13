@@ -408,8 +408,141 @@ runTest();
     return True
 
 
+def check_chat_does_not_replace_grid() -> bool:
+    print("=== Chat Assistant Grid Invariance Check (3 questions) ===")
+    node_chat_script = """
+const fs = require('fs');
+
+class MockElement {
+  constructor(tagName = 'div') {
+    this.tagName = tagName;
+    this.innerHTML = '';
+    this.value = '';
+    this.children = [];
+    this.style = {};
+    this.className = '';
+    this.classList = {
+      add: () => {},
+      remove: () => {},
+      contains: () => false,
+      toggle: () => {},
+    };
+    this.id = '';
+  }
+  appendChild(child) {
+    this.children.push(child);
+  }
+  remove() {
+    if (this.parentNode) {
+      const idx = this.parentNode.children.indexOf(this);
+      if (idx !== -1) this.parentNode.children.splice(idx, 1);
+    }
+  }
+}
+
+const elements = {
+  movieGrid: new MockElement('div'),
+  chatInput: new MockElement('input'),
+  drawerMessages: new MockElement('div'),
+  toast: new MockElement('div'),
+  toastText: new MockElement('div'),
+  toastUndoBtn: new MockElement('button'),
+};
+
+global.localStorage = { getItem: () => null, setItem: () => {} };
+global.document = {
+  getElementById: (id) => elements[id] || new MockElement('div'),
+  createElement: (tag) => {
+    const el = new MockElement(tag);
+    el.parentNode = elements.drawerMessages;
+    return el;
+  },
+  addEventListener: () => {},
+};
+global.window = { addEventListener: () => {} };
+
+// Mock global fetch returning single card for query (e.g. Inception)
+global.fetch = async (url, options) => {
+  return {
+    ok: true,
+    json: async () => ({
+      response: "Inception was directed by Christopher Nolan (2010).",
+      cards: [
+        { movie_id: 2571, title: 'Inception', year: 2010, genres: ['Action', 'Sci-Fi'], match_pct: 98 }
+      ]
+    })
+  };
+};
+
+const code = fs.readFileSync(process.argv[1], 'utf8');
+eval(code + '; global.state = state; global.sendChatMessage = sendChatMessage; global.renderMovieGrid = renderMovieGrid;');
+
+async function runTest() {
+  // Initial 6 Discover cards
+  state.activeTab = 'discover';
+  state.movies = [
+    { movie_id: 1, title: 'M1', year: 1995, genres: ['Action'] },
+    { movie_id: 2, title: 'M2', year: 1995, genres: ['Action'] },
+    { movie_id: 3, title: 'M3', year: 1995, genres: ['Action'] },
+    { movie_id: 4, title: 'M4', year: 1995, genres: ['Action'] },
+    { movie_id: 5, title: 'M5', year: 1995, genres: ['Action'] },
+    { movie_id: 6, title: 'M6', year: 1995, genres: ['Action'] },
+  ];
+  renderMovieGrid(state.movies, [], {}, false, 'movieGrid');
+  elements.movieGrid.children.forEach(c => c.parentNode = elements.movieGrid);
+
+  const initialCount = elements.movieGrid.children.length;
+
+  // Ask 3 questions in chat
+  const questions = [
+    "who directed inception",
+    "recommend something like interstellar",
+    "best sci-fi movies"
+  ];
+
+  for (const q of questions) {
+    elements.chatInput.value = q;
+    await sendChatMessage();
+  }
+
+  const finalStateCount = state.movies.length;
+  const finalDomCount = elements.movieGrid.children.length;
+
+  console.log(JSON.stringify({
+    initialCount,
+    finalStateCount,
+    finalDomCount,
+    chatMessagesCount: elements.drawerMessages.children.length
+  }));
+}
+
+runTest();
+"""
+
+    res = subprocess.run(
+        ["node", "-e", node_chat_script, str(APP_JS)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if res.returncode != 0:
+        print(f"FAILED: Node execution error in chat grid check: {res.stderr}")
+        return False
+
+    data = json.loads(res.stdout)
+    if data["finalStateCount"] != 6 or data["finalDomCount"] != 6:
+        print(f"  ❌ Chat questions replaced grid! state count: {data['finalStateCount']}, dom count: {data['finalDomCount']}")
+        return False
+
+    print("  ✅ Asked 3 questions to Assistant: Discover grid strictly maintained all 6 recommendation cards.")
+    print("  ✅ Chat cards rendered in drawer without touching #movieGrid.")
+    print("\nChat Grid Invariance checks PASSED!\n")
+    return True
+
+
 if __name__ == "__main__":
     dom_ok = run_dom_check()
     vp_ok = check_viewports()
     replenish_ok = check_consecutive_replenish()
-    sys.exit(0 if (dom_ok and vp_ok and replenish_ok) else 1)
+    chat_ok = check_chat_does_not_replace_grid()
+    sys.exit(0 if (dom_ok and vp_ok and replenish_ok and chat_ok) else 1)

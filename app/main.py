@@ -38,7 +38,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 agent = MovieMindAgent()
 coldstart = agent.coldstart
-taste_map_service = TasteMapService()
+taste_map_service = TasteMapService(agent=agent)
 
 
 @app.on_event("startup")
@@ -46,8 +46,10 @@ def _preload_world_catalog_bg():
     """Preload world catalog and precomputed title index in a background daemon thread."""
     def _warm():
         try:
+            gr = global_recommender._get_instance()
             _ = agent.global_df
-            global_recommender._get_instance()
+            import gc
+            gc.collect()
         except Exception as exc:
             print(f"Background preload warning: {exc}")
 
@@ -66,7 +68,7 @@ class LazyGlobalRecommender:
 
     def _get_instance(self) -> GlobalContentRecommender:
         if self._instance is None:
-            self._instance = GlobalContentRecommender(self._catalog_path)
+            self._instance = GlobalContentRecommender.get_instance(self._catalog_path)
         return self._instance
 
     def __getattr__(self, name: str) -> Any:

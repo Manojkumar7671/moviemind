@@ -36,6 +36,14 @@ def intern_tuple(items):
 
 
 class GlobalContentRecommender:
+    _instance: Optional["GlobalContentRecommender"] = None
+
+    @classmethod
+    def get_instance(cls, catalog_path: Path = CATALOG_PATH) -> "GlobalContentRecommender":
+        if cls._instance is None:
+            cls._instance = cls(catalog_path)
+        return cls._instance
+
     def __init__(self, catalog_path: Path = CATALOG_PATH):
         self.catalog_path = Path(catalog_path)
         artifacts_dir = self.catalog_path.parent

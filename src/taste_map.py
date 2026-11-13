@@ -17,21 +17,25 @@ ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "artifacts"
 
 class TasteMapService:
     """Precomputed 2D projection of item embeddings and real-time user taste projection."""
-    def __init__(self, data_dir: Path = DATA_DIR, artifacts_dir: Path = ARTIFACTS_DIR):
-        self.movies_df = pd.read_parquet(data_dir / "movies.parquet")
+    def __init__(self, data_dir: Path = DATA_DIR, artifacts_dir: Path = ARTIFACTS_DIR, agent: Optional[Any] = None):
         self.item_ids = np.load(artifacts_dir / "item_ids.npy")
-        self.item_embs = np.load(artifacts_dir / "item_embeddings.npy")
+        self.item_embs = np.load(artifacts_dir / "item_embeddings.npy", mmap_mode="r")
         self.coords_2d = np.load(artifacts_dir / "taste_map_coords.npy")
 
         with open(artifacts_dir / "pca_model.pkl", "rb") as f:
             self.pca = pickle.load(f)
 
         self.mid_to_idx = {int(mid): idx for idx, mid in enumerate(self.item_ids)}
-        self.movie_meta = self.movies_df.set_index("movie_id").to_dict(orient="index")
+        if agent is not None and hasattr(agent, "movie_meta"):
+            self.movie_meta = agent.movie_meta
+            self.movies_df = agent.movies_df
+        else:
+            self.movies_df = pd.read_parquet(data_dir / "movies.parquet")
+            self.movie_meta = self.movies_df.set_index("movie_id").to_dict(orient="index")
 
-        # Bounds for normalization
-        self.c_min = self.pca.transform(self.item_embs).min(axis=0)
-        self.c_max = self.pca.transform(self.item_embs).max(axis=0)
+        # Bounds for normalization from precomputed 2D coords
+        self.c_min = self.coords_2d.min(axis=0)
+        self.c_max = self.coords_2d.max(axis=0)
 
     def normalize_coord(self, raw_coord: np.ndarray) -> np.ndarray:
         norm = 2.0 * (raw_coord - self.c_min) / (self.c_max - self.c_min + 1e-8) - 1.0
